@@ -1,59 +1,39 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+## Service 
+### 1. The Service Class = Reusability
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+Yes, the primary goal of the Service class is reusability. Because a controller must have only one responsibility (receiving the request and returning the response), you move the heavy business logic into a service class.
 
-## About Laravel
+If your boss asks you to build a totally different screen—like an "Admin Master Dashboard"—that also needs to calculate weekly percentages, you do not have to copy and paste code. You simply call `$this->weeklyPlanService->calculatePreviousWeekSummary()` from the new admin controller.
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+### 2. Eloquent = Readable & Maintainable Code
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+Yes, if you did not use Eloquent, you would be forced to write raw SQL strings directly into your PHP files. Eloquent allows you to write readable and maintainable code by replacing raw database commands with object-oriented PHP.
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+By using Eloquent and isolating your logic, your code becomes self-documenting. A new developer could read your file and instantly understand what it does without needing a database manual.
 
-## Learning Laravel
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework. You can also check out [Laravel Learn](https://laravel.com/learn), where you will be guided through building a modern Laravel application.
+## Request 
+Automatic Rejection: If a React frontend sends target_graduated: -5, Laravel automatically throws a 422 Unprocessable Entity error. Your controller code doesn't even run.
 
-If you don't feel like reading, [Laracasts](https://laracasts.com) can help. Laracasts contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+Cleaner Controllers: By doing this, we avoid writing $request->validate([...]) inside the controller itself, strictly following the rule to move validation out of controllers.
 
-## Laravel Sponsors
 
-We would like to extend our thanks to the following sponsors for funding Laravel development. If you are interested in becoming a sponsor, please visit the [Laravel Partners program](https://partners.laravel.com).
+## Data flow 
+How the Flow Completes
+The user types "3" into the Monday input.
 
-### Premium Partners
+They click "Save Day".
 
-- **[Vehikl](https://vehikl.com)**
-- **[Tighten Co.](https://tighten.co)**
-- **[Kirschbaum Development Group](https://kirschbaumdevelopment.com)**
-- **[64 Robots](https://64robots.com)**
-- **[Curotec](https://www.curotec.com/services/technologies/laravel)**
-- **[DevSquad](https://devsquad.com/hire-laravel-developers)**
-- **[Redberry](https://redberry.international/laravel-development)**
-- **[Active Logic](https://activelogic.com)**
+React Hook Form grabs all the numbers in that specific row.
 
-## Contributing
+Axios sends the PATCH request to Laravel.
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+Our DailyMetricController receives it, the UpdateDailyMetricRequest validates that it is a safe integer, and the database updates Monday's record.
 
-## Code of Conduct
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+## PATCH METHOD
+Use **`PATCH`** because it means **Partial Update**.
 
-## Security Vulnerabilities
-
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
-
-## License
-
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+* **`POST`** creates a new row (Monday already exists, so you can't use this).
+* **`PUT`** replaces the entire row (If you don't send every single column, the missing ones might be overwritten and wiped out).
+* **`PATCH`** only updates the fields you send. If you only send `"train_completed": 2`, it changes that one number and leaves the rest of Monday's data perfectly safe.
