@@ -5,7 +5,7 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\WeeklyActionPlanController;
 use App\Http\Controllers\DailyMetricController;
-
+// just comit 
 // 1. Public Routes (No authentication required)
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
