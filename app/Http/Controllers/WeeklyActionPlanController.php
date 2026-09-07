@@ -4,7 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\WeeklyActionPlan;
 use App\Http\Requests\StoreWeeklyActionPlanRequest;
-use Illuminate\Http\Request; // We will create an UpdateRequest later if needed
+use Illuminate\Http\Request;
 use App\Services\WeeklyPlanService;
 use App\Http\Resources\WeeklyPlanResource;
 use Carbon\Carbon;
@@ -15,12 +15,20 @@ class WeeklyActionPlanController extends Controller
 {
     public function __construct(protected WeeklyPlanService $planService) {}
 
-    // [READ] Get a list of all past and present weeks
-    public function index()
+    // [READ] Get a list of historical weeks based on filters
+    public function index(Request $request)
     {
-        // We use eager loading to prevent the N+1 query problem[cite: 1]
-        // Note: Hardcoding user_id 1 until Sanctum is fully configured
+        $year = $request->query('year');
+        $month = $request->query('month');
+
+        // Convert empty string to null to prevent SQL crashes
+        $week = $request->query('week');
+        if ($week === '') {
+            $week = null;
+        }
+
         $plans = WeeklyActionPlan::where('user_id', 1)
+            ->filterByPeriod($year, $month, $week) // 👉 Using the new scope!
             ->with('dailyMetrics')
             ->latest('start_date')
             ->paginate(10);
@@ -28,24 +36,19 @@ class WeeklyActionPlanController extends Controller
         return WeeklyPlanResource::collection($plans);
     }
 
-    // [CREATE] (Already completed)
     public function store(StoreWeeklyActionPlanRequest $request): WeeklyPlanResource
     {
         $plan = $this->planService->createPlan($request->validated(), 1);
         return new WeeklyPlanResource($plan->load('dailyMetrics'));
     }
 
-    // [READ] Get one specific week for the React dashboard
     public function show(WeeklyActionPlan $weeklyPlan): WeeklyPlanResource
     {
-        // Eager load the 6 days so React gets the full grid
         return new WeeklyPlanResource($weeklyPlan->load('dailyMetrics'));
     }
 
-    // [UPDATE] Update header targets or bottom reflections
     public function update(Request $request, WeeklyActionPlan $weeklyPlan): WeeklyPlanResource
     {
-        // For production, you should move this validation to an UpdateWeeklyActionPlanRequest class[cite: 1]
         $validated = $request->validate([
             'target_completed_training' => 'sometimes|integer|min:0',
             'target_completed_onboarding' => 'sometimes|integer|min:0',
@@ -61,7 +64,6 @@ class WeeklyActionPlanController extends Controller
         return new WeeklyPlanResource($weeklyPlan->load('dailyMetrics'));
     }
 
-    // [DELETE] Remove the week (Cascades to delete daily metrics automatically)
     public function destroy(WeeklyActionPlan $weeklyPlan): JsonResponse
     {
         $weeklyPlan->delete();
@@ -71,37 +73,36 @@ class WeeklyActionPlanController extends Controller
         ], 200);
     }
 
-
     public function current(Request $request)
     {
         $user = $request->user();
 
-        // 1. Try to find the user's most recent plan
-        $plan = $user->weeklyActionPlans()->with('dailyMetrics')->latest()->first();
+        // 1. Get the exact date for THIS Monday
+        $thisMonday = Carbon::now()->startOfWeek()->format('Y-m-d');
 
-        // 2. If no plan exists, we provision a fresh template
+        // 2. ONLY return a plan if it started on THIS Monday
+        $plan = $user->weeklyActionPlans()
+            ->with('dailyMetrics')
+            ->where('start_date', $thisMonday)
+            ->first();
+
+        // 3. If no plan exists for this exact week, generate a fresh one!
         if (!$plan) {
             $plan = DB::transaction(function () use ($user) {
-
-                // 🚨 FIX 1: We must define the Carbon dates up here so we can reuse them!
                 $startOfWeek = Carbon::now()->startOfWeek();
                 $endOfWeek = Carbon::now()->endOfWeek();
 
-                // A. Create the Weekly Plan parent record
                 $newPlan = $user->weeklyActionPlans()->create([
                     'start_date' => $startOfWeek->format('Y-m-d'),
                     'end_date' => $endOfWeek->format('Y-m-d'),
                     'week_number' => Carbon::now()->weekOfMonth,
                 ]);
 
-                // B. Generate the default empty rows for the work week
                 $days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-                // 🚨 FIX 2: Added $index => $day so the loop knows which day number it is on
                 foreach ($days as $index => $day) {
                     $newPlan->dailyMetrics()->create([
                         'day_name' => $day,
-                        // Now $startOfWeek and $index both exist, so this math works perfectly!
                         'record_date' => $startOfWeek->copy()->addDays($index)->format('Y-m-d'),
                         'train_expected' => 0,
                         'train_completed' => 0,
@@ -118,12 +119,10 @@ class WeeklyActionPlanController extends Controller
                     ]);
                 }
 
-                // C. Return the newly created plan with its metrics loaded
                 return $newPlan->load('dailyMetrics');
             });
         }
 
-        // 3. Return the data wrapped in a 'data' object
         return response()->json([
             'data' => $plan
         ]);
