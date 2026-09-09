@@ -5,7 +5,11 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\WeeklyActionPlanController;
 use App\Http\Controllers\DailyMetricController;
+
 use App\Http\Controllers\TelegramController;
+
+
+// just comit
 
 // 1. Public Routes (No authentication required)
 Route::post('/register', [AuthController::class, 'register']);

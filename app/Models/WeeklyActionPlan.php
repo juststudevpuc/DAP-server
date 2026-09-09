@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Carbon\Carbon;
 
 class WeeklyActionPlan extends Model
 {
@@ -46,7 +47,22 @@ class WeeklyActionPlan extends Model
 
     public function dailyMetrics(): HasMany
     {
-        // Explicitly define the foreign key since we didn't use 'weekly_action_plan_id'
         return $this->hasMany(DailyMetric::class, 'weekly_plan_id');
+    }
+
+    // 👉 Add this scope to allow easy filtering of historical data
+    public function scopeFilterByPeriod($query, $year, $month, $week = null)
+    {
+        if ($year) {
+            $query->whereYear('start_date', $year);
+        }
+        if ($month) {
+            $query->whereMonth('start_date', $month);
+        }
+        // If your weeks are stored as a number (1-5) in the week_number column
+        if ($week) {
+            $query->where('week_number', $week);
+        }
+        return $query;
     }
 }
