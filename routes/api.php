@@ -29,6 +29,8 @@ Route::middleware('auth:sanctum')->group(function () {
         return $request->user();
     });
 
+    Route::post('/weekly-plans/{weeklyPlan}/complete', [WeeklyActionPlanController::class, 'completeWeek']);
+    Route::delete('/weekly-plans/{weeklyPlan}', [WeeklyActionPlanController::class, 'destroy']);
     // Telegram Link Generation (Needs the logged-in user)
     Route::get('/telegram/link', [TelegramController::class, 'generateLink']);
 
