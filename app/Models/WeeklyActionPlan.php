@@ -5,7 +5,6 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Carbon\Carbon;
 
 class WeeklyActionPlan extends Model
 {
@@ -14,6 +13,7 @@ class WeeklyActionPlan extends Model
         'week_number',
         'start_date',
         'end_date',
+        'is_completed', // 👉 REQUIRED: Allows saving completion status
         'target_completed_training',
         'target_completed_onboarding',
         'target_graduated',
@@ -34,6 +34,7 @@ class WeeklyActionPlan extends Model
         return [
             'start_date' => 'datetime',
             'end_date' => 'datetime',
+            'is_completed' => 'boolean', // 👉 Ensures clean true/false serialization
             'last_week_training_pct' => 'decimal:2',
             'last_week_onboarding_pct' => 'decimal:2',
             'last_week_graduated_pct' => 'decimal:2',
@@ -50,16 +51,14 @@ class WeeklyActionPlan extends Model
         return $this->hasMany(DailyMetric::class, 'weekly_plan_id');
     }
 
-    // 👉 Add this scope to allow easy filtering of historical data
     public function scopeFilterByPeriod($query, $year, $month, $week = null)
     {
         if ($year) {
             $query->whereYear('start_date', $year);
         }
-        if ($month) {
+        if ($month && $month !== 'all') {
             $query->whereMonth('start_date', $month);
         }
-        // If your weeks are stored as a number (1-5) in the week_number column
         if ($week) {
             $query->where('week_number', $week);
         }

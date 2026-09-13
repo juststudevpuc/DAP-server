@@ -11,16 +11,19 @@ class WeeklyPlanResource extends JsonResource
     {
         return [
             'id' => $this->id,
-            'week_number' => $this->week_number,
-            'start_date' => $this->start_date->toDateString(),
-            'end_date' => $this->end_date->toDateString(),
+            'week_number' => (int) $this->week_number,
+            'start_date' => $this->start_date ? $this->start_date->toDateString() : null,
+            'end_date' => $this->end_date ? $this->end_date->toDateString() : null,
 
-            // 1. ADD MISSING TARGETS (For the Header)
+            // 👉 CRITICAL: Expose completion status so the React dropdown filter sees it
+            'is_completed' => (bool) $this->is_completed,
+
+            // 1. Targets (For Header)
             'target_completed_training' => $this->target_completed_training,
             'target_completed_onboarding' => $this->target_completed_onboarding,
             'target_graduated' => $this->target_graduated,
 
-            // 2. ADD MISSING LAST WEEK DATA (For the Footer)
+            // 2. Last Week Summary (For Footer)
             'last_week_training_qty' => $this->last_week_training_qty,
             'last_week_training_pct' => $this->last_week_training_pct,
             'last_week_onboarding_qty' => $this->last_week_onboarding_qty,
@@ -28,11 +31,11 @@ class WeeklyPlanResource extends JsonResource
             'last_week_graduated_qty' => $this->last_week_graduated_qty,
             'last_week_graduated_pct' => $this->last_week_graduated_pct,
 
-            // 3. ADD MISSING REFLECTIONS
+            // 3. Reflections
             'what_worked' => $this->what_worked,
             'what_didnt_work' => $this->what_didnt_work,
             'what_to_improve' => $this->what_to_improve,
-            'what_is_next' => $this->what_is_next, // This was causing the data loss!
+            'what_is_next' => $this->what_is_next,
 
             'daily_metrics' => $this->whenLoaded('dailyMetrics'),
             'summary' => [

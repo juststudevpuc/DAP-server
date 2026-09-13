@@ -9,30 +9,34 @@ use App\Http\Resources\WeeklyPlanResource;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class WeeklyActionPlanController extends Controller
 {
     public function __construct(protected WeeklyPlanService $planService) {}
 
-    // [READ] Get a list of historical weeks for the authenticated user
     public function index(Request $request)
     {
         $user = $request->user();
         $year = $request->query('year');
         $month = $request->query('month');
-
-        // Convert empty string to null to prevent SQL crashes
         $week = $request->query('week');
-        if ($week === '') {
-            $week = null;
+
+        $query = $user->weeklyActionPlans()->with('dailyMetrics');
+
+        if ($year) {
+            $query->whereYear('start_date', $year);
         }
 
-        // ✅ FIXED: Use $user->weeklyActionPlans() instead of hardcoding user_id 1
-        $plans = $user->weeklyActionPlans()
-            ->filterByPeriod($year, $month, $week)
-            ->with('dailyMetrics')
-            ->latest('start_date')
-            ->paginate(10);
+        if ($month && $month !== 'all') {
+            $query->whereMonth('start_date', $month);
+        }
+
+        if ($week !== null && $week !== '') {
+            $query->where('week_number', (int) $week);
+        }
+
+        $plans = $query->orderBy('start_date', 'desc')->get();
 
         return WeeklyPlanResource::collection($plans);
     }
@@ -40,13 +44,69 @@ class WeeklyActionPlanController extends Controller
     public function store(Request $request): WeeklyPlanResource
     {
         $user = $request->user();
-        $plan = $this->planService->createPlan($request->validated(), $user->id);
-        return new WeeklyPlanResource($plan->load('dailyMetrics'));
+
+        $validated = $request->validate([
+            'week_number' => 'required|integer|min:1|max:5',
+            'start_date' => 'required|date',
+            'target_completed_training' => 'nullable|integer|min:0',
+            'target_completed_onboarding' => 'nullable|integer|min:0',
+            'target_graduated' => 'nullable|integer|min:0',
+        ]);
+
+        $startDate = Carbon::parse($validated['start_date'])->startOfWeek();
+        $endDate = $startDate->copy()->endOfWeek();
+
+        // Prevent duplicate creation for the same user, year, month, and week number
+        $existing = $user->weeklyActionPlans()
+            ->with('dailyMetrics')
+            ->where('week_number', $validated['week_number'])
+            ->whereYear('start_date', $startDate->year)
+            ->whereMonth('start_date', $startDate->month)
+            ->first();
+
+        if ($existing) {
+            return new WeeklyPlanResource($existing);
+        }
+
+        $plan = DB::transaction(function () use ($user, $validated, $startDate, $endDate) {
+            $weeklyPlan = $user->weeklyActionPlans()->create([
+                'week_number' => $validated['week_number'],
+                'start_date' => $startDate->format('Y-m-d'),
+                'end_date' => $endDate->format('Y-m-d'),
+                'target_completed_training' => $validated['target_completed_training'] ?? 0,
+                'target_completed_onboarding' => $validated['target_completed_onboarding'] ?? 0,
+                'target_graduated' => $validated['target_graduated'] ?? 0,
+                'is_completed' => false,
+            ]);
+
+            $days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+            foreach ($days as $index => $day) {
+                $weeklyPlan->dailyMetrics()->create([
+                    'day_name' => $day,
+                    'record_date' => $startDate->copy()->addDays($index)->format('Y-m-d'),
+                    'train_expected' => 0,
+                    'train_completed' => 0,
+                    'train_cancel_delay' => 0,
+                    'onboard_company_info' => 0,
+                    'onboard_system_analysis' => 0,
+                    'onboard_configure_hr' => 0,
+                    'onboard_provide_lesson' => 0,
+                    'onboard_success' => 0,
+                    'grad_certificate' => 0,
+                    'grad_hr_policy' => 0,
+                    'grad_book' => 0,
+                    'comment' => '',
+                ]);
+            }
+
+            return $weeklyPlan->load('dailyMetrics');
+        });
+
+        return new WeeklyPlanResource($plan);
     }
 
     public function show(WeeklyActionPlan $weeklyPlan): WeeklyPlanResource
     {
-        // Optional security check: Ensure the plan belongs to the logged-in user
         if ($weeklyPlan->user_id !== request()->user()->id) {
             abort(403, 'Unauthorized action.');
         }
@@ -61,21 +121,24 @@ class WeeklyActionPlanController extends Controller
         }
 
         $validated = $request->validate([
-            'target_completed_training' => 'sometimes|integer|min:0',
-            'target_completed_onboarding' => 'sometimes|integer|min:0',
-            'target_graduated' => 'sometimes|integer|min:0',
+            'week_number' => 'sometimes|integer|min:1',
+            'target_completed_training' => 'nullable|integer|min:0',
+            'target_completed_onboarding' => 'nullable|integer|min:0',
+            'target_graduated' => 'nullable|integer|min:0',
             'what_worked' => 'nullable|string',
             'what_didnt_work' => 'nullable|string',
             'what_to_improve' => 'nullable|string',
             'what_is_next' => 'nullable|string',
+            'is_completed' => 'nullable|boolean',
         ]);
 
-        $weeklyPlan->update($validated);
+        $weeklyPlan->update(array_merge($validated, [
+            'is_completed' => true
+        ]));
 
         return new WeeklyPlanResource($weeklyPlan->load('dailyMetrics'));
     }
 
-    // 👉 ADD THE COMPLETE WEEK METHOD HERE:
     public function completeWeek(Request $request, WeeklyActionPlan $weeklyPlan): WeeklyPlanResource
     {
         if ($weeklyPlan->user_id !== $request->user()->id) {
@@ -83,93 +146,134 @@ class WeeklyActionPlanController extends Controller
         }
 
         $validated = $request->validate([
+            'week_number' => 'required|integer|min:1',
+            'target_completed_training' => 'nullable|integer|min:0',
+            'target_completed_onboarding' => 'nullable|integer|min:0',
+            'target_graduated' => 'nullable|integer|min:0',
             'what_worked' => 'nullable|string',
             'what_didnt_work' => 'nullable|string',
             'what_to_improve' => 'nullable|string',
             'what_is_next' => 'nullable|string',
+            'action_type' => 'nullable|string'
         ]);
 
-        $weeklyPlan->update(array_merge($validated, [
-            'is_completed' => true // Locks this week into history!
-        ]));
+        $targetWeekNumber = $validated['week_number'];
+        $actionType = $validated['action_type'] ?? 'create_new';
+        $user = $request->user();
+
+        $existingPlan = $user->weeklyActionPlans()
+            ->where('week_number', $targetWeekNumber)
+            ->where('id', '!=', $weeklyPlan->id)
+            ->where('is_completed', true)
+            ->first();
+
+        if ($existingPlan && $actionType === 'update_existing') {
+            $existingPlan->update([
+                'target_completed_training' => $validated['target_completed_training'] ?? $existingPlan->target_completed_training,
+                'target_completed_onboarding' => $validated['target_completed_onboarding'] ?? $existingPlan->target_completed_onboarding,
+                'target_graduated' => $validated['target_graduated'] ?? $existingPlan->target_graduated,
+                'what_worked' => $validated['what_worked'] ?? $existingPlan->what_worked,
+                'what_didnt_work' => $validated['what_didnt_work'] ?? $existingPlan->what_didnt_work,
+                'what_to_improve' => $validated['what_to_improve'] ?? $existingPlan->what_to_improve,
+                'what_is_next' => $validated['what_is_next'] ?? $existingPlan->what_is_next,
+                'is_completed' => true
+            ]);
+
+            $weeklyPlan->dailyMetrics()->delete();
+            $weeklyPlan->delete();
+
+            return new WeeklyPlanResource($existingPlan->load('dailyMetrics'));
+        }
+
+        $weeklyPlan->update([
+            'week_number' => $targetWeekNumber,
+            'target_completed_training' => $validated['target_completed_training'] ?? 0,
+            'target_completed_onboarding' => $validated['target_completed_onboarding'] ?? 0,
+            'target_graduated' => $validated['target_graduated'] ?? 0,
+            'what_worked' => $validated['what_worked'] ?? null,
+            'what_didnt_work' => $validated['what_didnt_work'] ?? null,
+            'what_to_improve' => $validated['what_to_improve'] ?? null,
+            'what_is_next' => $validated['what_is_next'] ?? null,
+            'is_completed' => true
+        ]);
 
         return new WeeklyPlanResource($weeklyPlan->load('dailyMetrics'));
     }
 
-  public function destroy(WeeklyActionPlan $weeklyPlan): JsonResponse
-{
-    if ($weeklyPlan->user_id !== request()->user()->id) {
-        abort(403, 'Unauthorized action.');
-    }
-
-    // 1. Explicitly delete related daily metrics first to avoid database foreign key conflicts
-    $weeklyPlan->dailyMetrics()->delete();
-
-    // 2. Now delete the weekly plan itself from the database
-    $weeklyPlan->delete();
-
-    return response()->json([
-        'message' => 'Weekly plan and its daily metrics deleted successfully.'
-    ], 200);
-}
-
-   public function current(Request $request): WeeklyPlanResource
-{
-    $user = $request->user();
-
-    // 1. Find the user's absolute latest weekly plan
-    $latestPlan = $user->weeklyActionPlans()
-        ->with('dailyMetrics')
-        ->latest('start_date')
-        ->first();
-
-    // 2. If they have a plan and it's NOT completed yet, return it as their "Current Active Week"
-    if ($latestPlan && !$latestPlan->is_completed) {
-        return new WeeklyPlanResource($latestPlan);
-    }
-
-    // 3. Otherwise (First time user, or previous week was completed), generate the next sequential week!
-    $startDate = $latestPlan
-        ? Carbon::parse($latestPlan->end_date)->addDay() // Day after last week ended
-        : Carbon::now()->startOfWeek();                  // Absolute first week
-
-    $endDate = $startDate->copy()->endOfWeek();
-
-    // Dynamically calculate the week number relative to user's history count + 1
-    $nextWeekNumber = $user->weeklyActionPlans()->count() + 1;
-
-    $newPlan = DB::transaction(function () use ($user, $startDate, $endDate, $nextWeekNumber) {
-        $plan = $user->weeklyActionPlans()->create([
-            'start_date' => $startDate->format('Y-m-d'),
-            'end_date' => $endDate->format('Y-m-d'),
-            'week_number' => $nextWeekNumber,
-            'is_completed' => false, // Active until finished
-        ]);
-
-        $days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-
-        foreach ($days as $index => $day) {
-            $plan->dailyMetrics()->create([
-                'day_name' => $day,
-                'record_date' => $startDate->copy()->addDays($index)->format('Y-m-d'),
-                'train_expected' => 0,
-                'train_completed' => 0,
-                'train_cancel_delay' => 0,
-                'onboard_company_info' => 0,
-                'onboard_system_analysis' => 0,
-                'onboard_configure_hr' => 0,
-                'onboard_provide_lesson' => 0,
-                'onboard_success' => 0,
-                'grad_certificate' => 0,
-                'grad_hr_policy' => 0,
-                'grad_book' => 0,
-                'comment' => '',
-            ]);
+    public function destroy(WeeklyActionPlan $weeklyPlan): JsonResponse
+    {
+        if ($weeklyPlan->user_id !== request()->user()->id) {
+            abort(403, 'Unauthorized action.');
         }
 
-        return $plan->load('dailyMetrics');
-    });
+        $weeklyPlan->dailyMetrics()->delete();
+        $weeklyPlan->delete();
 
-    return new WeeklyPlanResource($newPlan);
-}
+        return response()->json([
+            'message' => 'Weekly plan and its daily metrics deleted successfully.'
+        ], 200);
+    }
+
+    public function current(Request $request): WeeklyPlanResource
+    {
+        $user = $request->user();
+
+        $activePlan = $user->weeklyActionPlans()
+            ->with('dailyMetrics')
+            ->where('is_completed', false)
+            ->latest('start_date')
+            ->first();
+
+        if ($activePlan) {
+            return new WeeklyPlanResource($activePlan);
+        }
+
+        $maxWeekNumber = $user->weeklyActionPlans()->max('week_number') ?? 0;
+        $nextWeekNumber = ($maxWeekNumber % 4) + 1;
+
+        $latestCompleted = $user->weeklyActionPlans()
+            ->where('is_completed', true)
+            ->latest('end_date')
+            ->first();
+
+        $startDate = $latestCompleted
+            ? Carbon::parse($latestCompleted->end_date)->addDay()
+            : Carbon::now()->startOfWeek();
+
+        $endDate = $startDate->copy()->endOfWeek();
+
+        $newPlan = DB::transaction(function () use ($user, $startDate, $endDate, $nextWeekNumber) {
+            $plan = $user->weeklyActionPlans()->create([
+                'start_date' => $startDate->format('Y-m-d'),
+                'end_date' => $endDate->format('Y-m-d'),
+                'week_number' => $nextWeekNumber,
+                'is_completed' => false,
+            ]);
+
+            $days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+            foreach ($days as $index => $day) {
+                $plan->dailyMetrics()->create([
+                    'day_name' => $day,
+                    'record_date' => $startDate->copy()->addDays($index)->format('Y-m-d'),
+                    'train_expected' => 0,
+                    'train_completed' => 0,
+                    'train_cancel_delay' => 0,
+                    'onboard_company_info' => 0,
+                    'onboard_system_analysis' => 0,
+                    'onboard_configure_hr' => 0,
+                    'onboard_provide_lesson' => 0,
+                    'onboard_success' => 0,
+                    'grad_certificate' => 0,
+                    'grad_hr_policy' => 0,
+                    'grad_book' => 0,
+                    'comment' => '',
+                ]);
+            }
+
+            return $plan->load('dailyMetrics');
+        });
+
+        return new WeeklyPlanResource($newPlan);
+    }
 }
