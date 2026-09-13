@@ -173,7 +173,7 @@ public function sendImageToUser(Request $request): JsonResponse
 
     // 2. Validate the incoming image
     $request->validate([
-        'image' => 'required|file|mimes:png,jpg,jpeg|max:5120', // Max 5MB
+        'image' => 'required|file|mimes:png,jpg,jpeg|max:10240', // Max 10MB
     ]);
 
     $file = $request->file('image');
