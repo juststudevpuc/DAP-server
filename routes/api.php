@@ -6,20 +6,14 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\WeeklyActionPlanController;
 use App\Http\Controllers\DailyMetricController;
-
 use App\Http\Controllers\TelegramController;
-
-
-// just comit
 
 // 1. Public Routes (No authentication required)
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
 
 // 🚨 TELEGRAM WEBHOOK: Must be public because Telegram's servers don't log in.
-// (Ensure your controller expects the $secret parameter from Step 3)
 Route::post('/telegram/{secret}/webhook', [TelegramController::class, 'handleWebhook']);
-
 
 // 2. Protected Routes (Require a valid Bearer token)
 Route::middleware('auth:sanctum')->group(function () {
@@ -30,12 +24,24 @@ Route::middleware('auth:sanctum')->group(function () {
         return $request->user();
     });
 
+    // 🚀 Temporary Promotion Route (Use once, then delete)
+    Route::get('/make-me-super-admin', function (Request $request) {
+        $user = $request->user();
+        $user->update(['role' => 'super_admin']);
+
+        return response()->json([
+            'success' => true,
+            'message' => "Success! User {$user->email} is now a super_admin."
+        ]);
+    });
+
     Route::post('/weekly-plans/{weeklyPlan}/complete', [WeeklyActionPlanController::class, 'completeWeek']);
     Route::delete('/weekly-plans/{weeklyPlan}', [WeeklyActionPlanController::class, 'destroy']);
-    // Telegram Link Generation (Needs the logged-in user)
-    Route::get('/telegram/link', [TelegramController::class, 'generateLink']);
 
+    // Telegram Link Generation
+    Route::get('/telegram/link', [TelegramController::class, 'generateLink']);
     Route::post('/telegram/send-image', [TelegramController::class, 'sendImageToUser']);
+
     // 🚨 Place this BEFORE the apiResource!
     Route::get('/weekly-plans/current', [WeeklyActionPlanController::class, 'current']);
 
@@ -43,17 +49,18 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::apiResource('weekly-plans', WeeklyActionPlanController::class);
     Route::patch('daily-metrics/{dailyMetric}', [DailyMetricController::class, 'update']);
 
-        // Admin & Super Admin Shared Group (Team Overview, Summary Reports & Staff Directory)
-        Route::middleware('isAdmin')->prefix('admin')->group(function () {
-            Route::get('/users', [UserManagementController::class, 'index']); // 👈 Moved here so regular admins can see the dropdown list
-            Route::get('/company-summary', [WeeklyActionPlanController::class, 'companySummary']);
-            Route::get('/member-plan', [WeeklyActionPlanController::class, 'getMemberPlan']);
-            Route::get('/team-reports', [WeeklyActionPlanController::class, 'teamReportsSummary']);
-        });
+    // Admin & Super Admin Shared Group
+    Route::middleware('isAdmin')->prefix('admin')->group(function () {
+        Route::get('/users', [UserManagementController::class, 'index']);
+        Route::get('/company-summary', [WeeklyActionPlanController::class, 'companySummary']);
+        Route::get('/member-plan', [WeeklyActionPlanController::class, 'getMemberPlan']);
+        Route::get('/team-reports', [WeeklyActionPlanController::class, 'teamReportsSummary']);
+    });
 
-        // Super Admin Exclusive Group (Role management only)
-        Route::middleware('isSuperAdmin')->prefix('super-admin')->group(function () {
-            Route::patch('/users/{user}/role', [UserManagementController::class, 'updateRole']);
-            Route::patch('/users/{id}/role', [UserManagementController::class, 'updateRole']);
-        });
+    // Super Admin Exclusive Group
+    Route::middleware('isSuperAdmin')->prefix('super-admin')->group(function () {
+        Route::patch('/users/{user}/role', [UserManagementController::class, 'updateRole']);
+        Route::patch('/users/{id}/role', [UserManagementController::class, 'updateRole']);
+    });
+
 });
