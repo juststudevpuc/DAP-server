@@ -195,110 +195,68 @@ class TelegramController extends Controller
      * 7. Send selected multi-select daily reports to Telegram.
      */
     public function sendDailyImagesToTelegram(Request $request): JsonResponse
-    {
-        $user = $request->user();
+{
+    $user = $request->user();
 
-        if (!$user->telegram_chat_id) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Please connect your Telegram account first.'
-            ], 403);
-        }
-
-        $request->validate([
-            'days' => 'required|array|min:1', // e.g. ['Mon', 'Wed']
-            'week_number' => 'required|integer',
-            'year' => 'required|integer',
-            'month' => 'required|integer',
-        ]);
-
-        $selectedDays = $request->input('days');
-        $weekNumber = $request->input('week_number');
-        $year = $request->input('year');
-        $month = $request->input('month');
-
-        // Find the user's weekly action plan for this period
-        $plan = \App\Models\WeeklyActionPlan::with('dailyMetrics')
-            ->where('user_id', $user->id)
-            ->whereYear('start_date', $year)
-            ->whereMonth('start_date', $month)
-            ->where('week_number', $weekNumber)
-            ->first();
-
-        if (!$plan) {
-            return response()->json([
-                'success' => false,
-                'message' => 'No action plan found for this week.'
-            ], 404);
-        }
-
-        // Filter metrics for the selected days
-        $filteredMetrics = $plan->dailyMetrics->filter(function ($metric) use ($selectedDays) {
-            return in_array($metric->day_name, $selectedDays);
-        });
-
-        if ($filteredMetrics->isEmpty()) {
-            return response()->json([
-                'success' => false,
-                'message' => 'No records found for the selected days.'
-            ], 404);
-        }
-
-        // Format short days into full names and structure the multi-select title string
-        $formattedDays = collect($selectedDays)->map(function($day) {
-            return match($day) {
-                'Mon' => 'Monday',
-                'Tue' => 'Tuesday',
-                'Wed' => 'Wednesday',
-                'Thu' => 'Thursday',
-                'Fri' => 'Friday',
-                'Sat' => 'Saturday',
-                default => $day
-            };
-        });
-
-        $count = $formattedDays->count();
-        if ($count === 1) {
-            $dayTitle = "Daily action on " . $formattedDays->first();
-        } elseif ($count === 2) {
-            $dayTitle = "Daily action on " . $formattedDays->get(0) . " and " . $formattedDays->get(1);
-        } else {
-            $last = $formattedDays->pop();
-            $dayTitle = "Daily action on " . $formattedDays->implode(', ') . " and " . $last;
-        }
-
-        // Build the Telegram message text layout
-        $message = "📊 *{$dayTitle}*\n";
-        $message .= "👤 *Name:* {$user->name} | 📌 *Week:* {$weekNumber}\n\n";
-
-        foreach ($filteredMetrics as $m) {
-            $message .= "🔹 *{$m->day_name}* ({$m->record_date})\n";
-            $message .= "   • Train Done: {$m->train_completed} / Exp: {$m->train_expected}\n";
-            $message .= "   • Onboard Success: {$m->onboard_success}\n";
-            $message .= "   • Grad Book: {$m->grad_book}\n";
-            if (!empty($m->comment)) {
-                $message .= "   • Note: {$m->comment}\n";
-            }
-            $message .= "\n";
-        }
-
-        // Send via Telegram API
-        $response = Http::post("https://api.telegram.org/bot" . env('TELEGRAM_BOT_TOKEN') . "/sendMessage", [
-            'chat_id' => $user->telegram_chat_id,
-            'text' => $message,
-            'parse_mode' => 'Markdown',
-        ]);
-
-        if ($response->successful()) {
-            return response()->json([
-                'success' => true,
-                'message' => 'Daily report sent successfully to Telegram!'
-            ]);
-        }
-
+    if (!$user->telegram_chat_id) {
         return response()->json([
             'success' => false,
-            'message' => 'Failed to send message to Telegram API.'
-        ], 500);
+            'message' => 'Please connect your Telegram account first.'
+        ], 403);
     }
+
+    $request->validate([
+        'image' => 'required|file|mimes:png,jpg,jpeg|max:10240',
+        'days' => 'required|array|min:1', // e.g. ['Mon', 'Wed']
+        'week_number' => 'required|integer',
+        'year' => 'required|integer',
+        'month' => 'required|integer',
+    ]);
+
+    $selectedDays = $request->input('days');
+    $file = $request->file('image');
+
+    // Format short days into full names and build your exact custom title string
+    $formattedDays = collect($selectedDays)->map(function($day) {
+        return match($day) {
+            'Mon' => 'Monday',
+            'Tue' => 'Tuesday',
+            'Wed' => 'Wednesday',
+            'Thu' => 'Thursday',
+            'Fri' => 'Friday',
+            'Sat' => 'Saturday',
+            default => $day
+        };
+    });
+
+    $count = $formattedDays->count();
+    if ($count === 1) {
+        $dayTitle = "Daily action on " . $formattedDays->first();
+    } elseif ($count === 2) {
+        $dayTitle = "Daily action on " . $formattedDays->get(0) . " and " . $formattedDays->get(1);
+    } else {
+        $last = $formattedDays->pop();
+        $dayTitle = "Daily action on " . $formattedDays->implode(', ') . " and " . $last;
+    }
+
+    // Send the Photo with the dynamic title as caption to Telegram
+    $response = Http::attach(
+        'photo', file_get_contents($file->getRealPath()), 'daily_plan.png'
+    )->post("https://api.telegram.org/bot" . env('TELEGRAM_BOT_TOKEN') . "/sendPhoto", [
+        'chat_id' => $user->telegram_chat_id,
+        'caption' => "{$dayTitle}",
+    ]);
+
+    if ($response->successful()) {
+        return response()->json([
+            'success' => true,
+            'message' => 'Daily image report sent successfully to Telegram!'
+        ]);
+    }
+
+    return response()->json([
+        'success' => false,
+        'message' => 'Telegram API rejected the file.'
+    ], 500);
+}
 }
