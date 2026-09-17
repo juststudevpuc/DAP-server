@@ -250,13 +250,13 @@ class TelegramController extends Controller
             'photo', file_get_contents($file->getRealPath()), 'daily_plan.png'
         )->post("https://api.telegram.org/bot" . env('TELEGRAM_BOT_TOKEN') . "/sendPhoto", [
             'chat_id' => $user->telegram_chat_id,
-            'caption' => "📊 {$dayTitle}",
+            'caption' => "{$dayTitle}",
         ]);
 
         if ($response->successful()) {
             return response()->json([
                 'success' => true,
-                'message' => 'Daily image report sent successfully to Telegram!'
+                'message' => '✅ Daily image report sent successfully to Telegram!'
             ]);
         }
 
