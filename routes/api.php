@@ -27,9 +27,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/weekly-plans/{weeklyPlan}/complete', [WeeklyActionPlanController::class, 'completeWeek']);
     Route::delete('/weekly-plans/{weeklyPlan}', [WeeklyActionPlanController::class, 'destroy']);
 
-    // Telegram Link Generation
+    // Telegram Link & Image Routes
     Route::get('/telegram/link', [TelegramController::class, 'generateLink']);
     Route::post('/telegram/send-image', [TelegramController::class, 'sendImageToUser']);
+    Route::post('/telegram/send-daily-images', [TelegramController::class, 'sendDailyImagesToTelegram']); // 👈 Added here!
 
     // 🚨 Place this BEFORE the apiResource!
     Route::get('/weekly-plans/current', [WeeklyActionPlanController::class, 'current']);
