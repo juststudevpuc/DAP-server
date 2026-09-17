@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Admin\UserManagementController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\AuthController;
@@ -41,4 +42,18 @@ Route::middleware('auth:sanctum')->group(function () {
     // App Data Routes
     Route::apiResource('weekly-plans', WeeklyActionPlanController::class);
     Route::patch('daily-metrics/{dailyMetric}', [DailyMetricController::class, 'update']);
+
+        // Admin & Super Admin Shared Group (Team Overview, Summary Reports & Staff Directory)
+        Route::middleware('isAdmin')->prefix('admin')->group(function () {
+            Route::get('/users', [UserManagementController::class, 'index']); // 👈 Moved here so regular admins can see the dropdown list
+            Route::get('/company-summary', [WeeklyActionPlanController::class, 'companySummary']);
+            Route::get('/member-plan', [WeeklyActionPlanController::class, 'getMemberPlan']);
+            Route::get('/team-reports', [WeeklyActionPlanController::class, 'teamReportsSummary']);
+        });
+
+        // Super Admin Exclusive Group (Role management only)
+        Route::middleware('isSuperAdmin')->prefix('super-admin')->group(function () {
+            Route::patch('/users/{user}/role', [UserManagementController::class, 'updateRole']);
+            Route::patch('/users/{id}/role', [UserManagementController::class, 'updateRole']);
+        });
 });

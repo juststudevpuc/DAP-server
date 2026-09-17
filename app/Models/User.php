@@ -26,7 +26,8 @@ class User extends Authenticatable
         'name',
         'email',
         'password',
-        'telegram_chat_id',      
+        'role',
+        'telegram_chat_id',
         'telegram_verify_token',
     ];
 
@@ -57,4 +58,14 @@ class User extends Authenticatable
     {
         return $this->hasMany(WeeklyActionPlan::class);
     }
+
+    public function isSuperAdmin(): bool
+{
+    return ($this->role ?? 'user') === 'super_admin';
 }
+
+    public function isAdmin(): bool
+        {
+           return in_array($this->role, ['admin', 'super_admin']);
+        }
+    }

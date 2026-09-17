@@ -1,5 +1,7 @@
 <?php
 
+use App\Http\Middleware\EnsureIsSuperAdmin;
+use App\Http\Middleware\EnsureUserIsAdmin;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -15,6 +17,10 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->validateCsrfTokens(except: [
             'telegram/webhook',
         ]);
+        $middleware->alias([
+        'isAdmin' => EnsureUserIsAdmin::class,
+        'isSuperAdmin' => EnsureIsSuperAdmin::class,
+    ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         //
