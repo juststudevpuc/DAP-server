@@ -195,68 +195,74 @@ class TelegramController extends Controller
      * 7. Send selected multi-select daily reports to Telegram.
      */
     public function sendDailyImagesToTelegram(Request $request): JsonResponse
-{
-    $user = $request->user();
+    {
+        $user = $request->user();
 
-    if (!$user->telegram_chat_id) {
+        if (!$user->telegram_chat_id) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Please connect your Telegram account first.'
+            ], 403);
+        }
+
+        // 💡 Make validation robust for FormData arrays
+        $request->validate([
+            'image' => 'required|file|mimes:png,jpg,jpeg|max:10240',
+            'days' => 'required', // Can be array or string
+            'week_number' => 'required|integer',
+            'year' => 'required|integer',
+            'month' => 'required|integer',
+        ]);
+
+        // Normalize days whether it comes as an array or json string
+        $selectedDays = $request->input('days');
+        if (is_string($selectedDays)) {
+            $selectedDays = json_decode($selectedDays, true);
+        }
+
+        $file = $request->file('image');
+
+        // Format days into full names for the title
+        $formattedDays = collect($selectedDays)->map(function($day) {
+            return match($day) {
+                'Mon' => 'Monday',
+                'Tue' => 'Tuesday',
+                'Wed' => 'Wednesday',
+                'Thu' => 'Thursday',
+                'Fri' => 'Friday',
+                'Sat' => 'Saturday',
+                default => $day
+            };
+        });
+
+        $count = $formattedDays->count();
+        if ($count === 1) {
+            $dayTitle = "Daily action on " . $formattedDays->first();
+        } elseif ($count === 2) {
+            $dayTitle = "Daily action on " . $formattedDays->get(0) . " and " . $formattedDays->get(1);
+        } else {
+            $last = $formattedDays->pop();
+            $dayTitle = "Daily action on " . $formattedDays->implode(', ') . " and " . $last;
+        }
+
+        // Send Photo to Telegram with custom caption
+        $response = Http::attach(
+            'photo', file_get_contents($file->getRealPath()), 'daily_plan.png'
+        )->post("https://api.telegram.org/bot" . env('TELEGRAM_BOT_TOKEN') . "/sendPhoto", [
+            'chat_id' => $user->telegram_chat_id,
+            'caption' => "📊 {$dayTitle}",
+        ]);
+
+        if ($response->successful()) {
+            return response()->json([
+                'success' => true,
+                'message' => 'Daily image report sent successfully to Telegram!'
+            ]);
+        }
+
         return response()->json([
             'success' => false,
-            'message' => 'Please connect your Telegram account first.'
-        ], 403);
+            'message' => 'Telegram API rejected the file.'
+        ], 500);
     }
-
-    $request->validate([
-        'image' => 'required|file|mimes:png,jpg,jpeg|max:10240',
-        'days' => 'required|array|min:1', // e.g. ['Mon', 'Wed']
-        'week_number' => 'required|integer',
-        'year' => 'required|integer',
-        'month' => 'required|integer',
-    ]);
-
-    $selectedDays = $request->input('days');
-    $file = $request->file('image');
-
-    // Format short days into full names and build your exact custom title string
-    $formattedDays = collect($selectedDays)->map(function($day) {
-        return match($day) {
-            'Mon' => 'Monday',
-            'Tue' => 'Tuesday',
-            'Wed' => 'Wednesday',
-            'Thu' => 'Thursday',
-            'Fri' => 'Friday',
-            'Sat' => 'Saturday',
-            default => $day
-        };
-    });
-
-    $count = $formattedDays->count();
-    if ($count === 1) {
-        $dayTitle = "Daily action on " . $formattedDays->first();
-    } elseif ($count === 2) {
-        $dayTitle = "Daily action on " . $formattedDays->get(0) . " and " . $formattedDays->get(1);
-    } else {
-        $last = $formattedDays->pop();
-        $dayTitle = "Daily action on " . $formattedDays->implode(', ') . " and " . $last;
-    }
-
-    // Send the Photo with the dynamic title as caption to Telegram
-    $response = Http::attach(
-        'photo', file_get_contents($file->getRealPath()), 'daily_plan.png'
-    )->post("https://api.telegram.org/bot" . env('TELEGRAM_BOT_TOKEN') . "/sendPhoto", [
-        'chat_id' => $user->telegram_chat_id,
-        'caption' => "{$dayTitle}",
-    ]);
-
-    if ($response->successful()) {
-        return response()->json([
-            'success' => true,
-            'message' => 'Daily image report sent successfully to Telegram!'
-        ]);
-    }
-
-    return response()->json([
-        'success' => false,
-        'message' => 'Telegram API rejected the file.'
-    ], 500);
-}
 }
