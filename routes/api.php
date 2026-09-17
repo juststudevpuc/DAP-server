@@ -24,23 +24,6 @@ Route::middleware('auth:sanctum')->group(function () {
         return $request->user();
     });
 
-    // 🚀 Temporary Promotion Route (No token required, updates by email)
-Route::get('/make-me-super-admin', function (Request $request) {
-    // Put your exact login email here!
-    $user = \App\Models\User::where('email', 'ahseven@trainer.com')->first();
-
-    if (!$user) {
-        return response()->json(['success' => false, 'message' => 'User not found. Please register first!'], 404);
-    }
-
-    $user->update(['role' => 'super_admin']);
-
-    return response()->json([
-        'success' => true,
-        'message' => "Success! User {$user->email} is now a super_admin."
-    ]);
-});
-
     Route::post('/weekly-plans/{weeklyPlan}/complete', [WeeklyActionPlanController::class, 'completeWeek']);
     Route::delete('/weekly-plans/{weeklyPlan}', [WeeklyActionPlanController::class, 'destroy']);
 
