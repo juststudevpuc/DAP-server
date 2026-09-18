@@ -269,45 +269,44 @@ class TelegramController extends Controller
         ], 500);
     }
     public function sendWeeklyImagesToTelegram(Request $request): JsonResponse
-{
-    $user = $request->user();
+    {
+        $user = $request->user();
 
-    if (!$user->telegram_chat_id) {
+        if (!$user->telegram_chat_id) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Please connect your Telegram account first.'
+            ], 403);
+        }
+
+        $request->validate([
+            'image' => 'required|file|mimes:png,jpg,jpeg|max:10240',
+            'week_number' => 'required|integer',
+            'month' => 'required|integer',
+            'year' => 'required|integer',
+            'caption' => 'nullable|string',
+        ]);
+
+        $file = $request->file('image');
+        $caption = $request->input('caption', 'Weekly Action Plan Report');
+
+        $response = Http::attach(
+            'photo', file_get_contents($file->getRealPath()), 'weekly_plan.png'
+        )->post("https://api.telegram.org/bot" . env('TELEGRAM_BOT_TOKEN') . "/sendPhoto", [
+            'chat_id' => $user->telegram_chat_id,
+            'caption' => "📊 " . $caption,
+        ]);
+
+        if ($response->successful()) {
+            return response()->json([
+                'success' => true,
+                'message' => 'Weekly image report sent successfully to Telegram!'
+            ]);
+        }
+
         return response()->json([
             'success' => false,
-            'message' => 'Please connect your Telegram account first.'
-        ], 403);
+            'message' => 'Telegram API rejected the file.'
+        ], 500);
     }
-
-    $request->validate([
-        'image' => 'required|file|mimes:png,jpg,jpeg|max:10240',
-        'week_number' => 'required|integer',
-        'month' => 'required|integer',
-        'year' => 'required|integer',
-        'caption' => 'nullable|string',
-    ]);
-
-    $file = $request->file('image');
-    // Default caption fallback if not provided
-    $caption = $request->input('caption', 'Weekly Action Plan Report');
-
-    $response = Http::attach(
-        'photo', file_get_contents($file->getRealPath()), 'weekly_plan.png'
-    )->post("https://api.telegram.org/bot" . env('TELEGRAM_BOT_TOKEN') . "/sendPhoto", [
-        'chat_id' => $user->telegram_chat_id,
-        'caption' => "📊 " . $caption,
-    ]);
-
-    if ($response->successful()) {
-        return response()->json([
-            'success' => true,
-            'message' => 'Weekly image report sent successfully to Telegram!'
-        ]);
-    }
-
-    return response()->json([
-        'success' => false,
-        'message' => 'Telegram API rejected the file.'
-    ], 500);
-}
 }

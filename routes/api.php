@@ -31,7 +31,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/telegram/link', [TelegramController::class, 'generateLink']);
     Route::post('/telegram/send-image', [TelegramController::class, 'sendImageToUser']);
     Route::post('/telegram/send-daily-images', [TelegramController::class, 'sendDailyImagesToTelegram']); // 👈 Added here!
-
+    Route::post('/telegram/send-weekly-images', [TelegramController::class, 'sendWeeklyImagesToTelegram']);
+    
     // 🚨 Place this BEFORE the apiResource!
     Route::get('/weekly-plans/current', [WeeklyActionPlanController::class, 'current']);
 
