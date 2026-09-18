@@ -51,6 +51,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::middleware('isSuperAdmin')->prefix('super-admin')->group(function () {
         Route::patch('/users/{user}/role', [UserManagementController::class, 'updateRole']);
         Route::patch('/users/{id}/role', [UserManagementController::class, 'updateRole']);
+        Route::delete('/users/{user}', [UserManagementController::class, 'destroy']);
     });
 
 });

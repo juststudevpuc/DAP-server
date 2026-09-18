@@ -53,4 +53,21 @@ class UserManagementController extends Controller
             'user'    => $user
         ]);
     }
+        public function destroy(Request $request, User $user)
+        {
+            // Prevent super admin from deleting their own account
+            if ($request->user()->id === $user->id) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'You cannot delete your own super admin account.'
+                ], 403);
+            }
+
+            $user->delete();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'User deleted successfully.'
+            ]);
+        }
 }
