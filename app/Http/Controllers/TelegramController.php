@@ -181,7 +181,7 @@ class TelegramController extends Controller
             'photo', file_get_contents($file->getRealPath()), 'weekly_plan.png'
         )->post("https://api.telegram.org/bot" . env('TELEGRAM_BOT_TOKEN') . "/sendPhoto", [
             'chat_id' => $user->telegram_chat_id,
-            'caption' => '📊 Here is your Action Plan!',
+            'caption' => 'Here is your Action Plan!',
         ]);
 
         if ($response->successful()) {
@@ -253,7 +253,7 @@ class TelegramController extends Controller
             'photo', file_get_contents($file->getRealPath()), 'daily_plan.png'
         )->post("https://api.telegram.org/bot" . env('TELEGRAM_BOT_TOKEN') . "/sendPhoto", [
             'chat_id' => $user->telegram_chat_id,
-            'caption' => "📊 {$dayTitle}",
+            'caption' => "{$dayTitle}",
         ]);
 
         if ($response->successful()) {
