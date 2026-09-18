@@ -205,24 +205,28 @@ class TelegramController extends Controller
             ], 403);
         }
 
-        // 💡 Make validation robust for FormData arrays
         $request->validate([
             'image' => 'required|file|mimes:png,jpg,jpeg|max:10240',
-            'days' => 'required', // Can be array or string
+            'days' => 'required',
             'week_number' => 'required|integer',
             'year' => 'required|integer',
             'month' => 'required|integer',
         ]);
 
-        // Normalize days whether it comes as an array or json string
         $selectedDays = $request->input('days');
         if (is_string($selectedDays)) {
             $selectedDays = json_decode($selectedDays, true);
         }
 
+        if (empty($selectedDays) || !is_array($selectedDays)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Please select at least one valid day.'
+            ], 422);
+        }
+
         $file = $request->file('image');
 
-        // Format days into full names for the title
         $formattedDays = collect($selectedDays)->map(function($day) {
             return match($day) {
                 'Mon' => 'Monday',
@@ -245,18 +249,17 @@ class TelegramController extends Controller
             $dayTitle = "Daily action on " . $formattedDays->implode(', ') . " and " . $last;
         }
 
-        // Send Photo to Telegram with custom caption
         $response = Http::attach(
             'photo', file_get_contents($file->getRealPath()), 'daily_plan.png'
         )->post("https://api.telegram.org/bot" . env('TELEGRAM_BOT_TOKEN') . "/sendPhoto", [
             'chat_id' => $user->telegram_chat_id,
-            'caption' => "{$dayTitle}",
+            'caption' => "📊 {$dayTitle}",
         ]);
 
         if ($response->successful()) {
             return response()->json([
                 'success' => true,
-                'message' => '✅ Daily image report sent successfully to Telegram!'
+                'message' => 'Daily image report sent successfully to Telegram!'
             ]);
         }
 

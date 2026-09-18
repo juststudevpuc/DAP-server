@@ -321,7 +321,9 @@ class WeeklyActionPlanController extends Controller
             foreach ($plan->dailyMetrics as $m) {
                 $actualTraining += $m->train_completed ?? 0;
                 $actualOnboarding += $m->onboard_success ?? 0;
-                $actualGraduated += $m->grad_book ?? 0;
+
+                // 💡 Sum all graduation types instead of just grad_book
+                $actualGraduated += ($m->grad_certificate ?? 0) + ($m->grad_hr_policy ?? 0) + ($m->grad_book ?? 0);
 
                 $categoryTotals['Company Information'] += $m->onboard_company_info ?? 0;
                 $categoryTotals['System Analysis'] += $m->onboard_system_analysis ?? 0;
@@ -346,7 +348,9 @@ class WeeklyActionPlanController extends Controller
                 $aggregatedDays[$dayName]['train_completed'] += $m->train_completed ?? 0;
                 $aggregatedDays[$dayName]['train_cancel_delay'] += $m->train_cancel_delay ?? 0;
                 $aggregatedDays[$dayName]['onboard_success'] += $m->onboard_success ?? 0;
-                $aggregatedDays[$dayName]['grad_book'] += $m->grad_book ?? 0;
+
+                // 💡 Update aggregated day count too
+                $aggregatedDays[$dayName]['grad_book'] += ($m->grad_certificate ?? 0) + ($m->grad_hr_policy ?? 0) + ($m->grad_book ?? 0);
             }
         }
 
@@ -478,7 +482,8 @@ class WeeklyActionPlanController extends Controller
         foreach ($plan->dailyMetrics as $metric) {
             $totalActualTraining += $metric->train_completed ?? 0;
             $totalActualOnboarding += $metric->onboard_success ?? 0;
-            $totalActualGraduated += $metric->grad_book ?? 0;
+            // 💡 Sum all graduation types globally
+            $totalActualGraduated += ($metric->grad_certificate ?? 0) + ($metric->grad_hr_policy ?? 0) + ($metric->grad_book ?? 0);
             $totalDelaysCancels += $metric->train_cancel_delay ?? 0;
         }
     }
