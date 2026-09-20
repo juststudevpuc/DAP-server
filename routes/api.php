@@ -7,6 +7,14 @@ use App\Http\Controllers\AuthController;
 use App\Http\Controllers\WeeklyActionPlanController;
 use App\Http\Controllers\DailyMetricController;
 use App\Http\Controllers\TelegramController;
+use App\Models\User;
+
+Route::get('/public/stats', function () {
+    return response()->json([
+        'success' => true,
+        'total_users' => User::count()
+    ]);
+});
 
 // 1. Public Routes (No authentication required)
 Route::post('/register', [AuthController::class, 'register']);
@@ -32,7 +40,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/telegram/send-image', [TelegramController::class, 'sendImageToUser']);
     Route::post('/telegram/send-daily-images', [TelegramController::class, 'sendDailyImagesToTelegram']); // 👈 Added here!
     Route::post('/telegram/send-weekly-images', [TelegramController::class, 'sendWeeklyImagesToTelegram']);
-    
+
     // 🚨 Place this BEFORE the apiResource!
     Route::get('/weekly-plans/current', [WeeklyActionPlanController::class, 'current']);
 
