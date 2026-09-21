@@ -54,6 +54,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/company-summary', [WeeklyActionPlanController::class, 'companySummary']);
         Route::get('/member-plan', [WeeklyActionPlanController::class, 'getMemberPlan']);
         Route::get('/team-reports', [WeeklyActionPlanController::class, 'teamReportsSummary']);
+
     });
 
     // Super Admin Exclusive Group
@@ -62,7 +63,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::patch('/users/{id}/role', [UserManagementController::class, 'updateRole']);
         Route::delete('/users/{user}', [UserManagementController::class, 'destroy']);
     });
-
+    Route::post('/company-summary/notes', [WeeklyActionPlanController::class, 'saveSummaryNotes']);
     Route::put('/admin/users/{user}/reset-password', [UserManagementController::class, 'adminResetPassword']);
 
 });
