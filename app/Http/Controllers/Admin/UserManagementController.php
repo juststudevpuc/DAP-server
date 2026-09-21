@@ -6,17 +6,16 @@ use App\Http\Controllers\Controller;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Hash; // 👈 Don't forget to import Hash
 
 class UserManagementController extends Controller
 {
-   public function index(Request $request): JsonResponse
+    public function index(Request $request): JsonResponse
     {
         $currentUser = $request->user();
 
         $query = User::select('id', 'name', 'email', 'role', 'created_at');
 
-        // If the logged-in user is a regular 'admin' (not a super_admin),
-        // hide other super_admins from their list view.
         if ($currentUser->role === 'admin') {
             $query->where('role', '!=', 'super_admin');
         }
@@ -26,7 +25,6 @@ class UserManagementController extends Controller
         return response()->json([
             'success' => true,
             'data' => $users
-            
         ]);
     }
 
@@ -44,7 +42,6 @@ class UserManagementController extends Controller
             ], 422);
         }
 
-        // Direct property assignment bypasses $fillable restrictions
         $user->role = $validated['role'];
         $user->save();
 
@@ -54,21 +51,46 @@ class UserManagementController extends Controller
             'user'    => $user
         ]);
     }
-        public function destroy(Request $request, User $user)
-        {
-            // Prevent super admin from deleting their own account
-            if ($request->user()->id === $user->id) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'You cannot delete your own super admin account.'
-                ], 403);
-            }
 
-            $user->delete();
-
+    public function destroy(Request $request, User $user)
+    {
+        if ($request->user()->id === $user->id) {
             return response()->json([
-                'success' => true,
-                'message' => 'User deleted successfully.'
-            ]);
+                'success' => false,
+                'message' => 'You cannot delete your own super admin account.'
+            ], 403);
         }
+
+        $user->delete();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'User deleted successfully.'
+        ]);
+    }
+
+    // --- NEW METHOD: Admin Password Reset ---
+    public function adminResetPassword(Request $request, User $user): JsonResponse
+    {
+        // Optional security guard: Ensure requester is super_admin or admin
+        if (!in_array($request->user()->role, ['super_admin', 'admin'])) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized action.'
+            ], 403);
+        }
+
+        $validated = $request->validate([
+            'password' => 'required|string|min:8|confirmed',
+        ]);
+
+        $user->update([
+            'password' => Hash::make($validated['password']),
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => "Password successfully reset for {$user->name}.",
+        ]);
+    }
 }
