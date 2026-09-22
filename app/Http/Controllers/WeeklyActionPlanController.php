@@ -416,7 +416,7 @@ class WeeklyActionPlanController extends Controller
     ]);
 }
 
- public function companySummary(Request $request): JsonResponse
+public function companySummary(Request $request): JsonResponse
     {
         $validated = $request->validate([
             'year'        => 'required|integer',
@@ -428,7 +428,6 @@ class WeeklyActionPlanController extends Controller
         $month = $validated['month'] ?? null;
         $weekNumber = $validated['week_number'] ?? null;
 
-        // 💡 Fetch all weekly plans matching the timeframe across ALL users
         $query = WeeklyActionPlan::with(['user:id,name,email', 'dailyMetrics'])
             ->whereYear('start_date', $year);
 
@@ -442,17 +441,12 @@ class WeeklyActionPlanController extends Controller
 
         $plans = $query->get();
 
-        // Fallback team totals if no plans exist yet
-        $totalTargetTraining = $plans->sum('target_completed_training') ?: 90;
-        $totalTargetOnboarding = $plans->sum('target_completed_onboarding') ?: 81;
-        $totalTargetGraduated = $plans->sum('target_graduated') ?: 81;
-
         $totalActualTraining = 0;
         $totalActualOnboarding = 0;
         $totalActualGraduated = 0;
         $totalDelaysCancels = 0;
 
-        // Group by user to build the team breakdown table
+        // Map member breakdown with individual defaults (10, 9, 9)
         $memberBreakdown = User::all()->map(function ($user) use ($year, $month, $weekNumber) {
             $userPlans = $user->weeklyActionPlans()
                 ->when($year, fn($q) => $q->whereYear('start_date', $year))
@@ -461,9 +455,13 @@ class WeeklyActionPlanController extends Controller
                 ->with('dailyMetrics')
                 ->get();
 
-            $tTarget = $userPlans->sum('target_completed_training') ?: 30;
-            $oTarget = $userPlans->sum('target_completed_onboarding') ?: 27;
-            $gTarget = $userPlans->sum('target_graduated') ?: 27;
+            $savedTraining = $userPlans->sum('target_completed_training');
+            $savedOnboarding = $userPlans->sum('target_completed_onboarding');
+            $savedGraduated = $userPlans->sum('target_graduated');
+
+            $tTarget = $savedTraining > 0 ? $savedTraining : 10;
+            $oTarget = $savedOnboarding > 0 ? $savedOnboarding : 9;
+            $gTarget = $savedGraduated > 0 ? $savedGraduated : 9;
 
             $tActual = 0;
             $oActual = 0;
@@ -490,6 +488,11 @@ class WeeklyActionPlanController extends Controller
             ];
         })->values();
 
+        // Explicit Company-Wide Targets
+        $totalTargetTraining = 90;
+        $totalTargetOnboarding = 81;
+        $totalTargetGraduated = 81;
+
         foreach ($plans as $plan) {
             foreach ($plan->dailyMetrics as $metric) {
                 $totalActualTraining += $metric->train_completed ?? 0;
@@ -498,6 +501,20 @@ class WeeklyActionPlanController extends Controller
                 $totalDelaysCancels += $metric->train_cancel_delay ?? 0;
             }
         }
+
+        // Real database category and graduation breakdowns
+        $categoryTotals = [
+            'Company Information' => $plans->sum(fn($p) => $p->dailyMetrics->sum('onboard_company_info')),
+            'System Analysis' => $plans->sum(fn($p) => $p->dailyMetrics->sum('onboard_system_analysis')),
+            'Configure HR Policy' => $plans->sum(fn($p) => $p->dailyMetrics->sum('onboard_configure_hr')),
+            'Provide Lesson (Path)' => $plans->sum(fn($p) => $p->dailyMetrics->sum('onboard_provide_lesson')),
+        ];
+
+        $gradBreakdown = [
+            'certificate' => $plans->sum(fn($p) => $p->dailyMetrics->sum('grad_certificate')),
+            'hr_policy' => $plans->sum(fn($p) => $p->dailyMetrics->sum('grad_hr_policy')),
+            'book' => $plans->sum(fn($p) => $p->dailyMetrics->sum('grad_book')),
+        ];
 
         $firstPlan = $plans->first();
         $notes = [
@@ -523,6 +540,8 @@ class WeeklyActionPlanController extends Controller
                     'delays_cancels' => $totalDelaysCancels,
                 ],
             ],
+            'category_totals' => $categoryTotals,
+            'graduation_breakdown' => $gradBreakdown,
             'notes' => $notes,
             'members' => $memberBreakdown,
         ]);
