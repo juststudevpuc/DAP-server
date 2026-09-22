@@ -12,6 +12,7 @@ use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+
 class WeeklyActionPlanController extends Controller
 {
     public function __construct(protected WeeklyPlanService $planService) {}
@@ -428,19 +429,15 @@ public function companySummary(Request $request): JsonResponse
         $month = $validated['month'] ?? null;
         $weekNumber = $validated['week_number'] ?? null;
 
-        // 💡 Robust query to capture all team plans for this timeframe
         $query = WeeklyActionPlan::with(['user:id,name,email', 'dailyMetrics'])
-            ->where('week_number', $weekNumber)
-            ->where(function($q) use ($year, $month) {
-                $q->whereYear('start_date', $year)
-                  ->orWhereYear('end_date', $year);
-            });
+            ->whereYear('start_date', $year);
 
         if (!empty($month)) {
-            $query->where(function($q) use ($month) {
-                $q->whereMonth('start_date', $month)
-                  ->orWhereMonth('end_date', $month);
-            });
+            $query->whereMonth('start_date', $month);
+        }
+
+        if (!empty($weekNumber)) {
+            $query->where('week_number', $weekNumber);
         }
 
         $plans = $query->get();
@@ -450,12 +447,12 @@ public function companySummary(Request $request): JsonResponse
         $totalActualGraduated = 0;
         $totalDelaysCancels = 0;
 
-        // Map individual members and their contributions
+        // Map member breakdown with individual defaults (10, 9, 9)
         $memberBreakdown = User::all()->map(function ($user) use ($year, $month, $weekNumber) {
             $userPlans = $user->weeklyActionPlans()
-                ->where('week_number', $weekNumber)
-                ->whereYear('start_date', $year)
+                ->when($year, fn($q) => $q->whereYear('start_date', $year))
                 ->when($month, fn($q) => $q->whereMonth('start_date', $month))
+                ->when($weekNumber, fn($q) => $q->where('week_number', $weekNumber))
                 ->with('dailyMetrics')
                 ->get();
 
@@ -492,12 +489,11 @@ public function companySummary(Request $request): JsonResponse
             ];
         })->values();
 
-        // Company targets (90, 81, 81)
+        // Explicit Company-Wide Targets
         $totalTargetTraining = 90;
         $totalTargetOnboarding = 81;
         $totalTargetGraduated = 81;
 
-        // 💡 Auto-sum all actual metrics dynamically across all fetched plans
         foreach ($plans as $plan) {
             foreach ($plan->dailyMetrics as $metric) {
                 $totalActualTraining += $metric->train_completed ?? 0;
@@ -507,7 +503,7 @@ public function companySummary(Request $request): JsonResponse
             }
         }
 
-        // 💡 Auto-sum category modules and graduation breakdowns from real database records
+        // Real database category and graduation breakdowns (from your working old version)
         $categoryTotals = [
             'Company Information' => $plans->sum(fn($p) => $p->dailyMetrics->sum('onboard_company_info')),
             'System Analysis' => $plans->sum(fn($p) => $p->dailyMetrics->sum('onboard_system_analysis')),
@@ -521,17 +517,17 @@ public function companySummary(Request $request): JsonResponse
             'book' => $plans->sum(fn($p) => $p->dailyMetrics->sum('grad_book')),
         ];
 
-        // Fetch independent admin notes for this specific company summary
-        $summaryNote = \App\Models\CompanySummaryNote::where('year', $year)
+        // 💡 Fetch independent admin notes for the summary report (instead of individual user notes)
+        $summaryNote = CompanySummaryNote::where('year', $year)
             ->when($month, fn($q) => $q->where('month', $month))
             ->where('week_number', $weekNumber)
             ->first();
 
         $notes = [
-            'what_worked' => $summaryNote?->what_worked ?? '',
-            'what_didnt_work' => $summaryNote?->what_didnt_work ?? '',
-            'what_to_improve' => $summaryNote?->what_to_improve ?? '',
-            'what_is_next' => $summaryNote?->what_is_next ?? '',
+            'what_worked' => $summaryNote?$summaryNote->what_worked : '',
+            'what_didnt_work' => $summaryNote?$summaryNote->what_didnt_work : '',
+            'what_to_improve' => $summaryNote?$summaryNote->what_to_improve : '',
+            'what_is_next' => $summaryNote?$summaryNote->what_is_next : '',
         ];
 
         return response()->json([
@@ -557,7 +553,7 @@ public function companySummary(Request $request): JsonResponse
         ]);
     }
 
-    // 💡 Save company summary notes independently without affecting personal plans
+    // 💡 Dedicated Admin Save Method for Summary Notes Only
     public function saveSummaryNotes(Request $request): JsonResponse
     {
         $validated = $request->validate([
@@ -586,7 +582,7 @@ public function companySummary(Request $request): JsonResponse
 
         return response()->json([
             'success' => true,
-            'message' => 'Company summary notes saved successfully!',
+            'message' => 'Weekly summary notes saved successfully!',
         ]);
     }
 }
