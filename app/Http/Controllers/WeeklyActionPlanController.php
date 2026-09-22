@@ -428,15 +428,19 @@ public function companySummary(Request $request): JsonResponse
         $month = $validated['month'] ?? null;
         $weekNumber = $validated['week_number'] ?? null;
 
+        // 💡 Robust query to capture all team plans for this timeframe
         $query = WeeklyActionPlan::with(['user:id,name,email', 'dailyMetrics'])
-            ->whereYear('start_date', $year);
+            ->where('week_number', $weekNumber)
+            ->where(function($q) use ($year, $month) {
+                $q->whereYear('start_date', $year)
+                  ->orWhereYear('end_date', $year);
+            });
 
         if (!empty($month)) {
-            $query->whereMonth('start_date', $month);
-        }
-
-        if (!empty($weekNumber)) {
-            $query->where('week_number', $weekNumber);
+            $query->where(function($q) use ($month) {
+                $q->whereMonth('start_date', $month)
+                  ->orWhereMonth('end_date', $month);
+            });
         }
 
         $plans = $query->get();
@@ -446,11 +450,12 @@ public function companySummary(Request $request): JsonResponse
         $totalActualGraduated = 0;
         $totalDelaysCancels = 0;
 
+        // Map individual members and their contributions
         $memberBreakdown = User::all()->map(function ($user) use ($year, $month, $weekNumber) {
             $userPlans = $user->weeklyActionPlans()
-                ->when($year, fn($q) => $q->whereYear('start_date', $year))
+                ->where('week_number', $weekNumber)
+                ->whereYear('start_date', $year)
                 ->when($month, fn($q) => $q->whereMonth('start_date', $month))
-                ->when($weekNumber, fn($q) => $q->where('week_number', $weekNumber))
                 ->with('dailyMetrics')
                 ->get();
 
@@ -487,10 +492,12 @@ public function companySummary(Request $request): JsonResponse
             ];
         })->values();
 
+        // Company targets (90, 81, 81)
         $totalTargetTraining = 90;
         $totalTargetOnboarding = 81;
         $totalTargetGraduated = 81;
 
+        // 💡 Auto-sum all actual metrics dynamically across all fetched plans
         foreach ($plans as $plan) {
             foreach ($plan->dailyMetrics as $metric) {
                 $totalActualTraining += $metric->train_completed ?? 0;
@@ -500,6 +507,7 @@ public function companySummary(Request $request): JsonResponse
             }
         }
 
+        // 💡 Auto-sum category modules and graduation breakdowns from real database records
         $categoryTotals = [
             'Company Information' => $plans->sum(fn($p) => $p->dailyMetrics->sum('onboard_company_info')),
             'System Analysis' => $plans->sum(fn($p) => $p->dailyMetrics->sum('onboard_system_analysis')),
@@ -513,7 +521,7 @@ public function companySummary(Request $request): JsonResponse
             'book' => $plans->sum(fn($p) => $p->dailyMetrics->sum('grad_book')),
         ];
 
-        // 💡 Fetch company summary notes from the dedicated table instead of individual plans
+        // Fetch independent admin notes for this specific company summary
         $summaryNote = \App\Models\CompanySummaryNote::where('year', $year)
             ->when($month, fn($q) => $q->where('month', $month))
             ->where('week_number', $weekNumber)
