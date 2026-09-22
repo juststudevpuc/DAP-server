@@ -8,6 +8,7 @@ use Illuminate\Http\Request;
 use App\Services\WeeklyPlanService;
 use App\Http\Resources\WeeklyPlanResource;
 use App\Models\CompanySummaryNote;
+use App\Models\TeamSummaryNote;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
@@ -503,7 +504,7 @@ public function companySummary(Request $request): JsonResponse
             }
         }
 
-        // Real database category and graduation breakdowns (from your working old version)
+        // Real database category and graduation breakdowns
         $categoryTotals = [
             'Company Information' => $plans->sum(fn($p) => $p->dailyMetrics->sum('onboard_company_info')),
             'System Analysis' => $plans->sum(fn($p) => $p->dailyMetrics->sum('onboard_system_analysis')),
@@ -517,17 +518,17 @@ public function companySummary(Request $request): JsonResponse
             'book' => $plans->sum(fn($p) => $p->dailyMetrics->sum('grad_book')),
         ];
 
-        // 💡 Fetch independent admin notes for the summary report (instead of individual user notes)
-        $summaryNote = CompanySummaryNote::where('year', $year)
+        // 💡 Fetch independent notes strictly from the TeamSummaryNote table
+        $summaryNote = TeamSummaryNote::where('year', $year)
             ->when($month, fn($q) => $q->where('month', $month))
             ->where('week_number', $weekNumber)
             ->first();
 
         $notes = [
-            'what_worked' => $summaryNote?$summaryNote->what_worked : '',
-            'what_didnt_work' => $summaryNote?$summaryNote->what_didnt_work : '',
-            'what_to_improve' => $summaryNote?$summaryNote->what_to_improve : '',
-            'what_is_next' => $summaryNote?$summaryNote->what_is_next : '',
+            'what_worked' => $summaryNote?->what_worked ?? '',
+            'what_didnt_work' => $summaryNote?->what_didnt_work ?? '',
+            'what_to_improve' => $summaryNote?->what_to_improve ?? '',
+            'what_is_next' => $summaryNote?->what_is_next ?? '',
         ];
 
         return response()->json([
@@ -546,6 +547,7 @@ public function companySummary(Request $request): JsonResponse
                     'delays_cancels' => $totalDelaysCancels,
                 ],
             ],
+            'category_tags' => $categoryTotals,
             'category_totals' => $categoryTotals,
             'graduation_breakdown' => $gradBreakdown,
             'notes' => $notes,
@@ -553,7 +555,6 @@ public function companySummary(Request $request): JsonResponse
         ]);
     }
 
-    // 💡 Dedicated Admin Save Method for Summary Notes Only
     public function saveSummaryNotes(Request $request): JsonResponse
     {
         $validated = $request->validate([
@@ -566,7 +567,7 @@ public function companySummary(Request $request): JsonResponse
             'what_is_next' => 'nullable|string',
         ]);
 
-        CompanySummaryNote::updateOrCreate(
+        TeamSummaryNote::updateOrCreate(
             [
                 'year' => $validated['year'],
                 'month' => $validated['month'],
