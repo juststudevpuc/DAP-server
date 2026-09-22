@@ -7,11 +7,11 @@ use App\Models\User;
 use Illuminate\Http\Request;
 use App\Services\WeeklyPlanService;
 use App\Http\Resources\WeeklyPlanResource;
+use App\Models\CompanySummaryNote;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-
 class WeeklyActionPlanController extends Controller
 {
     public function __construct(protected WeeklyPlanService $planService) {}
@@ -446,7 +446,6 @@ public function companySummary(Request $request): JsonResponse
         $totalActualGraduated = 0;
         $totalDelaysCancels = 0;
 
-        // Map member breakdown with individual defaults (10, 9, 9)
         $memberBreakdown = User::all()->map(function ($user) use ($year, $month, $weekNumber) {
             $userPlans = $user->weeklyActionPlans()
                 ->when($year, fn($q) => $q->whereYear('start_date', $year))
@@ -488,7 +487,6 @@ public function companySummary(Request $request): JsonResponse
             ];
         })->values();
 
-        // Explicit Company-Wide Targets
         $totalTargetTraining = 90;
         $totalTargetOnboarding = 81;
         $totalTargetGraduated = 81;
@@ -502,7 +500,6 @@ public function companySummary(Request $request): JsonResponse
             }
         }
 
-        // Real database category and graduation breakdowns
         $categoryTotals = [
             'Company Information' => $plans->sum(fn($p) => $p->dailyMetrics->sum('onboard_company_info')),
             'System Analysis' => $plans->sum(fn($p) => $p->dailyMetrics->sum('onboard_system_analysis')),
@@ -516,12 +513,17 @@ public function companySummary(Request $request): JsonResponse
             'book' => $plans->sum(fn($p) => $p->dailyMetrics->sum('grad_book')),
         ];
 
-        $firstPlan = $plans->first();
+        // 💡 Fetch company summary notes from the dedicated table instead of individual plans
+        $summaryNote = \App\Models\CompanySummaryNote::where('year', $year)
+            ->when($month, fn($q) => $q->where('month', $month))
+            ->where('week_number', $weekNumber)
+            ->first();
+
         $notes = [
-            'what_worked' => $firstPlan?->what_worked ?? '',
-            'what_didnt_work' => $firstPlan?->what_didnt_work ?? '',
-            'what_to_improve' => $firstPlan?->what_to_improve ?? '',
-            'what_is_next' => $firstPlan?->what_is_next ?? '',
+            'what_worked' => $summaryNote?->what_worked ?? '',
+            'what_didnt_work' => $summaryNote?->what_didnt_work ?? '',
+            'what_to_improve' => $summaryNote?->what_to_improve ?? '',
+            'what_is_next' => $summaryNote?->what_is_next ?? '',
         ];
 
         return response()->json([
@@ -547,7 +549,7 @@ public function companySummary(Request $request): JsonResponse
         ]);
     }
 
-    // 💡 NEW METHOD: Save or update company summary retrospective notes
+    // 💡 Save company summary notes independently without affecting personal plans
     public function saveSummaryNotes(Request $request): JsonResponse
     {
         $validated = $request->validate([
@@ -560,20 +562,23 @@ public function companySummary(Request $request): JsonResponse
             'what_is_next' => 'nullable|string',
         ]);
 
-        // Update all weekly action plans matching this year, month, and week number
-        WeeklyActionPlan::whereYear('start_date', $validated['year'])
-            ->whereMonth('start_date', $validated['month'])
-            ->where('week_number', $validated['week_number'])
-            ->update([
-                'what_worked' => $validated['what_worked'],
-                'what_didnt_work' => $validated['what_didnt_work'],
-                'what_to_improve' => $validated['what_to_improve'],
-                'what_is_next' => $validated['what_is_next'],
-            ]);
+        CompanySummaryNote::updateOrCreate(
+            [
+                'year' => $validated['year'],
+                'month' => $validated['month'],
+                'week_number' => $validated['week_number'],
+            ],
+            [
+                'what_worked' => $validated['what_worked'] ?? null,
+                'what_didnt_work' => $validated['what_didnt_work'] ?? null,
+                'what_to_improve' => $validated['what_to_improve'] ?? null,
+                'what_is_next' => $validated['what_is_next'] ?? null,
+            ]
+        );
 
         return response()->json([
             'success' => true,
-            'message' => 'Weekly summary notes saved successfully!',
+            'message' => 'Company summary notes saved successfully!',
         ]);
     }
 }
