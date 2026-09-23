@@ -93,4 +93,20 @@ class UserManagementController extends Controller
             'message' => "Password successfully reset for {$user->name}.",
         ]);
     }
+    public function toggleUserTelegram(Request $request, $id)
+    {
+        $request->validate([
+            'telegram_notifications_enabled' => 'required|boolean',
+        ]);
+
+        $user = User::findOrFail($id);
+        $user->telegram_notifications_enabled = $request->telegram_notifications_enabled;
+        $user->save();
+
+        return response()->json([
+            'success' => true,
+            'message' => "Telegram notifications updated for {$user->name}.",
+            'user' => $user
+        ]);
+    }
 }

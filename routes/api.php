@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Admin\UserManagementController;
+use App\Http\Controllers\AdminSettingController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\AuthController;
@@ -65,5 +66,9 @@ Route::middleware('auth:sanctum')->group(function () {
     });
     Route::post('/company-summary/notes', [WeeklyActionPlanController::class, 'saveSummaryNotes']);
     Route::put('/admin/users/{user}/reset-password', [UserManagementController::class, 'adminResetPassword']);
+    Route::get('/admin/telegram/auto-alerts', [AdminSettingController::class, 'getAutoAlertsStatus']);
+    Route::post('/admin/telegram/auto-alerts', [AdminSettingController::class, 'toggleAutoAlerts']);
+    Route::get('/admin/system-settings', [AdminSettingController::class, 'getSystemSettingsData']);
+    Route::post('/admin/users/{id}/telegram-toggle', [AdminSettingController::class, 'toggleUserTelegram']);
 
 });
