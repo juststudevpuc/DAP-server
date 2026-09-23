@@ -57,7 +57,7 @@ public function sendInstantTestReminder(Request $request, $id)
         ], 500);
     }
 
-    $message = "⚠️ អេប្រុសស្អាត {$user->name},\n\n ជួយបញ្ចប់ Daily Action Plan របស់អ្នកសម្រាប់ថ្ងៃនេះ។\n\n (Manual Test Alert from Super Admin)";
+    $message = "⚠️ អេប្រុសស្អាត {$user->name},\n\n ជួយបញ្ចប់ Daily Action Plan របស់អ្នកសម្រាប់ថ្ងៃនេះ។\n\n Hort mes!";
 
     $response = Http::post("https://api.telegram.org/bot{$botToken}/sendMessage", [
         'chat_id' => $user->telegram_chat_id,
@@ -67,7 +67,7 @@ public function sendInstantTestReminder(Request $request, $id)
     if ($response->successful()) {
         return response()->json([
             'success' => true,
-            'message' => "Test reminder successfully sent to {$user->name}!"
+            'message' => "Reminder successfully sent to {$user->name}!"
         ]);
     }
 
