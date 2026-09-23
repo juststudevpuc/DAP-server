@@ -4,8 +4,8 @@ namespace App\Http\Controllers;
 
 use App\Models\Setting;
 use Illuminate\Http\Request;
- use App\Models\User;
- 
+use App\Models\User;
+use Illuminate\Support\Facades\Http; // 💡 Make sure this is imported at the top
 class AdminSettingController extends Controller
 {
 
@@ -34,5 +34,46 @@ public function toggleUserTelegram(Request $request, $id)
         'success' => true,
         'message' => "Telegram alerts updated for {$user->name}.",
     ]);
+}
+
+
+public function sendInstantTestReminder(Request $request, $id)
+{
+    $user = User::findOrFail($id);
+
+    if (!$user->telegram_chat_id) {
+        return response()->json([
+            'success' => false,
+            'message' => "{$user->name} has not linked their Telegram account yet."
+        ], 400);
+    }
+
+    $botToken = env('TELEGRAM_BOT_TOKEN');
+
+    if (!$botToken) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Telegram Bot Token is missing in environment variables.'
+        ], 500);
+    }
+
+    $message = "⚠️ អេប្រុសស្អាត {$user->name},\n\n ជួយបញ្ចប់ Daily Action Plan របស់អ្នកសម្រាប់ថ្ងៃនេះ។\n\n (Manual Test Alert from Super Admin)";
+
+    $response = Http::post("https://api.telegram.org/bot{$botToken}/sendMessage", [
+        'chat_id' => $user->telegram_chat_id,
+        'text' => $message,
+    ]);
+
+    if ($response->successful()) {
+        return response()->json([
+            'success' => true,
+            'message' => "Test reminder successfully sent to {$user->name}!"
+        ]);
+    }
+
+    return response()->json([
+        'success' => false,
+        'message' => 'Failed to communicate with Telegram API.'
+    ], 500);
 }
 }

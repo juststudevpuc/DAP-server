@@ -74,5 +74,6 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/admin/system-settings', [AdminSettingController::class, 'getSystemSettingsData']);
     Route::post('/admin/users/{id}/telegram-toggle', [AdminSettingController::class, 'toggleUserTelegram']);
     Route::post('/admin/users/{id}/telegram-test', [AdminSettingController::class, 'sendInstantTestReminder']);
+    
 
 });
