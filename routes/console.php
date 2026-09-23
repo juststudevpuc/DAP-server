@@ -1,12 +1,13 @@
 <?php
 
+
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
-use Illuminate\Support\Facades\Schedule; // 💡 Import the Schedule facade
+use Illuminate\Support\Facades\Schedule;
 
 Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote');
 
-// 💡 Use Schedule::command instead of $schedule->command
-Schedule::command('telegram:send-daily-reminders')->dailyAt('18:00');
+// Change dailyAt from '18:00' to '22:00' (10:00 PM)
+Schedule::command('telegram:send-daily-reminders')->dailyAt('22:00');
