@@ -4,7 +4,7 @@ namespace App\Console\Commands;
 
 use Illuminate\Console\Command;
 use App\Models\User;
-use App\Models\DailyMetric; // Make sure this matches your daily action plan model
+use App\Models\DailyMetric;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Http;
 
@@ -37,14 +37,15 @@ class SendDailyReminders extends Command
                      ->get();
 
         foreach ($users as $user) {
-            // Check if the user has completed today's metrics in their daily action plan
-            $hasCompletedToday = DailyMetric::where('user_id', $user->id)
-                ->whereDate('date', $today)
-                ->where('is_completed', true) // Adjust this field name if your completion column differs
+            // Check if the user has recorded today's metrics via their weekly plan relation
+            $hasRecordedToday = DailyMetric::whereHas('weeklyPlan', function ($query) use ($user) {
+                    $query->where('user_id', $user->id);
+                })
+                ->whereDate('record_date', $today)
                 ->exists();
 
-            // If their toggle is ON, but they haven't completed today, send the alert!
-            if (!$hasCompletedToday) {
+            // If their toggle is ON, but they haven't recorded metrics for today, send the alert!
+            if (!$hasRecordedToday) {
                 $this->sendTelegramMessage($user->telegram_chat_id, $user->name);
             }
         }
