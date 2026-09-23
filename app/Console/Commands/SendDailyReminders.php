@@ -6,7 +6,9 @@ use Illuminate\Console\Command;
 use App\Models\User;
 use App\Models\DailyMetric;
 use Carbon\Carbon;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Request as FacadesRequest;
 
 class SendDailyReminders extends Command
 {
@@ -63,4 +65,35 @@ class SendDailyReminders extends Command
             'text' => $message,
         ]);
     }
+    public function sendInstantTestReminder(Request $request, $id)
+{
+    $user = User::findOrFail($id);
+
+    if (!$user->telegram_chat_id) {
+        return response()->json([
+            'success' => false,
+            'message' => "{$user->name} has not linked their Telegram account yet."
+        ], 400);
+    }
+
+    $botToken = env('TELEGRAM_BOT_TOKEN');
+    $message = "⚠️ អេប្រុសស្អាត {$user->name},\n\n ជួយបញ្ចប់ Daily Action Plan របស់អ្នកសម្រាប់ថ្ងៃនេះ។\n\n (Manual Test Alert from Super Admin)";
+
+    $response = \Illuminate\Support\Facades\Http::post("https://api.telegram.org/bot{$botToken}/sendMessage", [
+        'chat_id' => $user->telegram_chat_id,
+        'text' => $message,
+    ]);
+
+    if ($response->successful()) {
+        return response()->json([
+            'success' => true,
+            'message' => "Test reminder successfully sent to {$user->name}!"
+        ]);
+    }
+
+    return response()->json([
+        'success' => false,
+        'message' => 'Failed to send Telegram message. Check bot token.'
+    ], 500);
+}
 }

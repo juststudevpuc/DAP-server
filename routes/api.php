@@ -66,9 +66,13 @@ Route::middleware('auth:sanctum')->group(function () {
     });
     Route::post('/company-summary/notes', [WeeklyActionPlanController::class, 'saveSummaryNotes']);
     Route::put('/admin/users/{user}/reset-password', [UserManagementController::class, 'adminResetPassword']);
+
+
+    //auto telegram alerts routes
     Route::get('/admin/telegram/auto-alerts', [AdminSettingController::class, 'getAutoAlertsStatus']);
     Route::post('/admin/telegram/auto-alerts', [AdminSettingController::class, 'toggleAutoAlerts']);
     Route::get('/admin/system-settings', [AdminSettingController::class, 'getSystemSettingsData']);
     Route::post('/admin/users/{id}/telegram-toggle', [AdminSettingController::class, 'toggleUserTelegram']);
+    Route::post('/admin/users/{id}/telegram-test', [AdminSettingController::class, 'sendInstantTestReminder']);
 
 });
