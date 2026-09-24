@@ -29,6 +29,7 @@ class User extends Authenticatable
         'role',
         'telegram_chat_id',
         'telegram_verify_token',
+        'telegram_notifications_enabled',
     ];
 
     /**
