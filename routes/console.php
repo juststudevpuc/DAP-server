@@ -10,4 +10,4 @@ Artisan::command('inspire', function () {
 })->purpose('Display an inspiring quote');
 
 // Change dailyAt from '18:00' to '22:00' (10:00 PM)
-Schedule::command('telegram:send-daily-reminders')->dailyAt('22:00');
+Schedule::command('telegram:send-daily-reminders')->everyMinute();

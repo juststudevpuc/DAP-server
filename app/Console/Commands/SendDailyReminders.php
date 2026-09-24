@@ -29,31 +29,31 @@ class SendDailyReminders extends Command
     /**
      * Execute the console command.
      */
-    public function handle()
-    {
-        $today = Carbon::today()->toDateString();
+   public function handle()
+{
+    $today = Carbon::today()->toDateString();
 
-        // Find users whose individual toggle is Active and have a Telegram Chat ID linked
-        $users = User::where('telegram_notifications_enabled', true)
-                     ->whereNotNull('telegram_chat_id')
-                     ->get();
+    // Find users with Telegram alerts active and chat ID linked
+    $users = User::where('telegram_notifications_enabled', true)
+                 ->whereNotNull('telegram_chat_id')
+                 ->get();
 
-        foreach ($users as $user) {
-            // Check if the user has recorded today's metrics via their weekly plan relation
-            $hasRecordedToday = DailyMetric::whereHas('weeklyPlan', function ($query) use ($user) {
-                    $query->where('user_id', $user->id);
-                })
-                ->whereDate('record_date', $today)
-                ->exists();
+    foreach ($users as $user) {
+        // Check if this user has recorded a metric for today
+        $hasRecordedToday = DailyMetric::whereHas('weeklyPlan', function ($query) use ($user) {
+                $query->where('user_id', $user->id);
+            })
+            ->whereDate('record_date', $today)
+            ->exists();
 
-            // If their toggle is ON, but they haven't recorded metrics for today, send the alert!
-            if (!$hasRecordedToday) {
-                $this->sendTelegramMessage($user->telegram_chat_id, $user->name);
-            }
+        // If they HAVEN'T recorded today, send them the automatic reminder!
+        if (!$hasRecordedToday) {
+            $this->sendTelegramMessage($user->telegram_chat_id, $user->name);
         }
-
-        $this->info('Daily Telegram reminders sweep completed successfully.');
     }
+
+    $this->info('Daily Telegram reminders sweep completed successfully.');
+}
 
     private function sendTelegramMessage($chatId, $userName)
     {
@@ -65,5 +65,5 @@ class SendDailyReminders extends Command
             'text' => $message,
         ]);
     }
-    
+
 }
