@@ -39,15 +39,22 @@ class SendDailyReminders extends Command
                  ->get();
 
     foreach ($users as $user) {
-        // Check if this user has recorded a metric for today
-        $hasRecordedToday = DailyMetric::whereHas('weeklyPlan', function ($query) use ($user) {
+        // Check if the user has a submitted/filled metric for today
+        // Adjust these column names to match whatever fields represent actual filled work in your table
+        $hasCompletedToday = DailyMetric::whereHas('weeklyPlan', function ($query) use ($user) {
                 $query->where('user_id', $user->id);
             })
             ->whereDate('record_date', $today)
+            ->where(function($q) {
+                // Check if they filled out any of the core metrics (e.g., completed training/onboarding greater than 0 or notes are present)
+                $q->where('completed_training', '>', 0)
+                  ->orWhere('completed_onboarding', '>', 0)
+                  ->orWhereNotNull('notes');
+            })
             ->exists();
 
-        // If they HAVEN'T recorded today, send them the automatic reminder!
-        if (!$hasRecordedToday) {
+        // If they HAVEN'T completed today, send them the automatic reminder!
+        if (!$hasCompletedToday) {
             $this->sendTelegramMessage($user->telegram_chat_id, $user->name);
         }
     }
