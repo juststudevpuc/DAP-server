@@ -29,32 +29,35 @@ class SendDailyReminders extends Command
     /**
      * Execute the console command.
      */
-   public function handle()
+  public function handle()
 {
     $today = Carbon::today()->toDateString();
+    $this->info("Today's date is: {$today}");
 
     // Find users with Telegram alerts active and chat ID linked
     $users = User::where('telegram_notifications_enabled', true)
                  ->whereNotNull('telegram_chat_id')
                  ->get();
 
+    $this->info("Found " . $users->count() . " active users with Telegram linked.");
+
     foreach ($users as $user) {
-        // Check if the user has a submitted/filled metric for today
-        // Adjust these column names to match whatever fields represent actual filled work in your table
         $hasCompletedToday = DailyMetric::whereHas('weeklyPlan', function ($query) use ($user) {
                 $query->where('user_id', $user->id);
             })
             ->whereDate('record_date', $today)
             ->where(function($q) {
-                // Check if they filled out any of the core metrics (e.g., completed training/onboarding greater than 0 or notes are present)
                 $q->where('completed_training', '>', 0)
                   ->orWhere('completed_onboarding', '>', 0)
                   ->orWhereNotNull('notes');
             })
             ->exists();
 
+        $this->info("User: {$user->name} | Completed Today? " . ($hasCompletedToday ? 'YES' : 'NO'));
+
         // If they HAVEN'T completed today, send them the automatic reminder!
         if (!$hasCompletedToday) {
+            $this->info("Sending reminder to {$user->name}...");
             $this->sendTelegramMessage($user->telegram_chat_id, $user->name);
         }
     }
