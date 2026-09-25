@@ -39,7 +39,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // Telegram Link & Image Routes
     Route::get('/telegram/link', [TelegramController::class, 'generateLink']);
     Route::post('/telegram/send-image', [TelegramController::class, 'sendImageToUser']);
-    Route::post('/telegram/send-daily-images', [TelegramController::class, 'sendDailyImagesToTelegram']); // 👈 Added here!
+    Route::post('/telegram/send-daily-images', [TelegramController::class, 'sendDailyImagesToTelegram']);
     Route::post('/telegram/send-weekly-images', [TelegramController::class, 'sendWeeklyImagesToTelegram']);
 
     // 🚨 Place this BEFORE the apiResource!
@@ -56,6 +56,13 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/member-plan', [WeeklyActionPlanController::class, 'getMemberPlan']);
         Route::get('/team-reports', [WeeklyActionPlanController::class, 'teamReportsSummary']);
 
+        // Auto Telegram Alerts & System Settings Routes (Protected by isAdmin)
+        Route::get('/telegram/auto-alerts', [AdminSettingController::class, 'getAutoAlertsStatus']);
+        Route::post('/telegram/auto-alerts', [AdminSettingController::class, 'toggleAutoAlerts']);
+        Route::get('/system-settings', [AdminSettingController::class, 'getSystemSettingsData']);
+        Route::post('/users/{id}/telegram-toggle', [AdminSettingController::class, 'toggleUserTelegram']);
+        Route::post('/users/{id}/settings', [AdminSettingController::class, 'toggleUserTelegram']); // Dedicated modal save route
+        Route::post('/users/{id}/telegram-test', [AdminSettingController::class, 'sendInstantTestReminder']);
     });
 
     // Super Admin Exclusive Group
@@ -64,18 +71,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::patch('/users/{id}/role', [UserManagementController::class, 'updateRole']);
         Route::delete('/users/{user}', [UserManagementController::class, 'destroy']);
     });
+
     Route::post('/company-summary/notes', [WeeklyActionPlanController::class, 'saveSummaryNotes']);
     Route::put('/admin/users/{user}/reset-password', [UserManagementController::class, 'adminResetPassword']);
-
-
-    //auto telegram alerts routes
-    Route::get('/admin/telegram/auto-alerts', [AdminSettingController::class, 'getAutoAlertsStatus']);
-    Route::post('/admin/telegram/auto-alerts', [AdminSettingController::class, 'toggleAutoAlerts']);
-    Route::get('/admin/system-settings', [AdminSettingController::class, 'getSystemSettingsData']);
-    Route::post('/admin/users/{id}/telegram-toggle', [AdminSettingController::class, 'toggleUserTelegram']);
-    Route::post('/admin/users/{id}/telegram-test', [AdminSettingController::class, 'sendInstantTestReminder']);
-
-
-    Route::post('/admin/users/{id}/settings', [AdminSettingController::class, 'toggleUserTelegram']);
 
 });
