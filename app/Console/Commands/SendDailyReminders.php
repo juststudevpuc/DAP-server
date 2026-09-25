@@ -6,9 +6,7 @@ use Illuminate\Console\Command;
 use App\Models\User;
 use App\Models\DailyMetric;
 use Carbon\Carbon;
-use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Request as FacadesRequest;
 
 class SendDailyReminders extends Command
 {
@@ -29,32 +27,58 @@ class SendDailyReminders extends Command
     /**
      * Execute the console command.
      */
- public function handle()
-{
-    $today = Carbon::today()->toDateString();
-    $this->info("Today's date is: {$today}");
+    public function handle()
+    {
+        $today = Carbon::today()->toDateString();
+        $this->info("Today's date is: {$today}");
 
-    // Fetch ALL users that have a Telegram Chat ID linked, ignoring the toggle for a moment
-    $users = User::whereNotNull('telegram_chat_id')->get();
+        // 1. Fetch only users who have a Telegram Chat ID linked
+        // AND have explicitly enabled Telegram notifications in their settings!
+        $users = User::whereNotNull('telegram_chat_id')
+                    ->where('telegram_notifications_enabled', true)
+                    ->get();
 
-    $this->info("Total users with Telegram chat ID linked: " . $users->count());
+        $this->info("Total eligible users with notifications enabled: " . $users->count());
 
-    foreach ($users as $user) {
-        $this->info("User: {$user->name} | telegram_notifications_enabled value: " . var_export($user->telegram_notifications_enabled, true));
+        foreach ($users as $user) {
+            // 2. Check if the user has completed their daily metric/tasks for today
+            // (Adjust this condition based on how your DailyMetric table relates to users and dates)
+            $hasCompletedToday = DailyMetric::where('user_id', $user->id)
+                ->whereDate('created_at', $today)
+                // ->where('is_completed', true) // Uncomment/adjust if you have a completion flag
+                ->exists();
+
+            if (!$hasCompletedToday) {
+                $this->info("Sending reminder to: {$user->name}");
+                $this->sendTelegramMessage($user->telegram_chat_id, $user->name);
+            } else {
+                $this->info("Skipping {$user->name} (Already completed tasks for today).");
+            }
+        }
+
+        $this->info('Daily reminder sweep completed successfully.');
     }
-
-    $this->info('Diagnostic sweep completed.');
-}
 
     private function sendTelegramMessage($chatId, $userName)
     {
         $botToken = env('TELEGRAM_BOT_TOKEN');
-        $message = "⚠️ អេប្រុសស្អាត {$userName},\n\n ជួយបញ្ចប់ Daily Action Plan របស់អ្នកសម្រាប់ថ្ងៃនេះ។\n\n សូមចូលទៅកាន់ប្រព័ន្ធដើម្បីបញ្ចប់វា Hort mes";
 
-        Http::post("https://api.telegram.org/bot{$botToken}/sendMessage", [
+        if (!$botToken) {
+            $this->error('Telegram Bot Token is missing in environment variables.');
+            return;
+        }
+
+        $message = "⚠️ អេប្រុសស្អាត {$userName},\n\nជួយបញ្ចប់ Daily Action Plan របស់អ្នកសម្រាប់ថ្ងៃនេះ។\n\nសូមចូលទៅកាន់ប្រព័ន្ធដើម្បីបញ្ចប់វា Hort mes";
+
+        $response = Http::post("https://api.telegram.org/bot{$botToken}/sendMessage", [
             'chat_id' => $chatId,
             'text' => $message,
         ]);
-    }
 
+        if ($response->successful()) {
+            $this->info("Successfully sent alert to {$userName}!");
+        } else {
+            $this->error("Failed to send alert to {$userName}. Telegram API error.");
+        }
+    }
 }
