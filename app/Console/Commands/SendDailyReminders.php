@@ -41,11 +41,13 @@ class SendDailyReminders extends Command
         $this->info("Total eligible users with notifications enabled: " . $users->count());
 
         foreach ($users as $user) {
-            // 2. Check if the user has completed their daily metric/tasks for today
-            // (Adjust this condition based on how your DailyMetric table relates to users and dates)
-            $hasCompletedToday = DailyMetric::where('user_id', $user->id)
-                ->whereDate('created_at', $today)
-                // ->where('is_completed', true) // Uncomment/adjust if you have a completion flag
+            // Daily metric rows are pre-created with each weekly plan, so only an edited row
+            // indicates that the user has submitted today's metrics.
+            $hasCompletedToday = DailyMetric::whereHas('weeklyPlan', function ($query) use ($user) {
+                $query->where('user_id', $user->id);
+            })
+                ->whereDate('record_date', $today)
+                ->whereColumn('updated_at', '>', 'created_at')
                 ->exists();
 
             if (!$hasCompletedToday) {
