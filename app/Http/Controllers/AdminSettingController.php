@@ -22,27 +22,25 @@ class AdminSettingController extends Controller
    public function toggleUserTelegram(Request $request, $id)
 {
     if (!$request->user()->isSuperAdmin() && !$request->user()->isAdmin()) {
-        return response()->json(['success' => false, 'message' => 'Unauthorized.'], 403);
+        return response()->json([
+            'success' => false,
+            'message' => 'Unauthorized.'
+        ], 403);
     }
 
     $request->validate([
         'telegram_notifications_enabled' => 'required|boolean',
-        'telegram_chat_id' => 'nullable|string', // Allow saving chat ID from UI
     ]);
 
     $user = User::findOrFail($id);
     $user->telegram_notifications_enabled = $request->telegram_notifications_enabled;
-
-    // If the frontend sends a chat ID, save it to the database table!
-    if ($request->has('telegram_chat_id') && !empty($request->telegram_chat_id)) {
-        $user->telegram_chat_id = $request->telegram_chat_id;
-    }
-
     $user->save();
 
+    // 🔍 Return the user object so we can inspect it in the browser Network tab
     return response()->json([
         'success' => true,
-        'message' => "Telegram settings updated for {$user->name}.",
+        'message' => "Telegram alerts updated for {$user->name}.",
+        'updated_user' => $user
     ]);
 }
 
