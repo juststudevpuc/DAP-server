@@ -28,18 +28,29 @@ class AdminSettingController extends Controller
         ], 403);
     }
 
-    $request->validate([
+    $validated = $request->validate([
         'telegram_notifications_enabled' => 'required|boolean',
     ]);
 
     $user = User::findOrFail($id);
-    $user->telegram_notifications_enabled = $request->telegram_notifications_enabled;
-    $user->save();
+    $requestedValue = (bool) $validated['telegram_notifications_enabled'];
+    $user->telegram_notifications_enabled = $requestedValue;
+    $user->saveOrFail();
+    $user->refresh();
 
-    // 🔍 Return the user object so we can inspect it in the browser Network tab
+    $persistedValue = (bool) $user->telegram_notifications_enabled;
+    if ($persistedValue !== $requestedValue) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Telegram alert setting was not persisted.',
+            'telegram_notifications_enabled' => $persistedValue,
+        ], 500);
+    }
+
     return response()->json([
         'success' => true,
         'message' => "Telegram alerts updated for {$user->name}.",
+        'telegram_notifications_enabled' => $persistedValue,
         'updated_user' => $user
     ]);
 }
