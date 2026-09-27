@@ -20,28 +20,28 @@ class AdminSettingController extends Controller
     }
 
     public function toggleUserTelegram(Request $request, $id)
-    {
-        // 🔒 Enforce security: ONLY a Super Admin can modify automated Telegram alerts
-        if (!$request->user()->isSuperAdmin()) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Unauthorized. Only Super Admins can modify these settings.'
-            ], 403);
-        }
-
-        $request->validate([
-            'telegram_notifications_enabled' => 'required|boolean',
-        ]);
-
-        $user = User::findOrFail($id);
-        $user->telegram_notifications_enabled = $request->telegram_notifications_enabled;
-        $user->save();
-
+{
+    // Allow if user is Super Admin OR regular Admin
+    if (!$request->user()->isSuperAdmin() && !$request->user()->isAdmin()) {
         return response()->json([
-            'success' => true,
-            'message' => "Telegram alerts updated for {$user->name}.",
-        ]);
+            'success' => false,
+            'message' => 'Unauthorized. Admin access required.'
+        ], 403);
     }
+
+    $request->validate([
+        'telegram_notifications_enabled' => 'required|boolean',
+    ]);
+
+    $user = User::findOrFail($id);
+    $user->telegram_notifications_enabled = $request->telegram_notifications_enabled;
+    $user->save();
+
+    return response()->json([
+        'success' => true,
+        'message' => "Telegram alerts updated for {$user->name}.",
+    ]);
+}
 
     public function sendInstantTestReminder(Request $request, $id)
     {
