@@ -7,16 +7,39 @@ use App\Models\User;
 use Illuminate\Http\Request;
 use App\Services\WeeklyPlanService;
 use App\Http\Resources\WeeklyPlanResource;
-use App\Models\CompanySummaryNote;
-use App\Models\TeamSummaryNote;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
 
 class WeeklyActionPlanController extends Controller
 {
     public function __construct(protected WeeklyPlanService $planService) {}
+
+    /**
+     * Calculate the exact Monday start_date for a given Year, Month, and Week (1-5).
+     * Matches the frontend formula: startDay = min((week - 1) * 7 + 1, daysInMonth) -> startOfWeek()
+     */
+    private function resolveExpectedStartDate(int $year, int $month, int $week): string
+    {
+        $daysInMonth = Carbon::createFromDate($year, $month, 1)->daysInMonth;
+        $startDay = min(($week - 1) * 7 + 1, $daysInMonth);
+
+        return Carbon::createFromDate($year, $month, $startDay)
+            ->startOfWeek()
+            ->format('Y-m-d');
+    }
+
+    /**
+     * Get all unique Monday start_dates for Weeks 1-5 of a given Year and Month.
+     */
+    private function resolveMonthStartDates(int $year, int $month): array
+    {
+        $dates = [];
+        for ($w = 1; $w <= 5; $w++) {
+            $dates[] = $this->resolveExpectedStartDate($year, $month, $w);
+        }
+        return array_values(array_unique($dates));
+    }
 
     public function index(Request $request)
     {
@@ -27,16 +50,21 @@ class WeeklyActionPlanController extends Controller
 
         $query = $user->weeklyActionPlans()->with('dailyMetrics');
 
-        if ($year) {
-            $query->whereYear('start_date', $year);
-        }
+        if ($year && $month && $month !== 'all' && $week !== null && $week !== '') {
+            // Finds the exact Monday (e.g. 2026-09-28 for Oct Week 1) without touching any other rows
+            $expectedStartDate = $this->resolveExpectedStartDate((int) $year, (int) $month, (int) $week);
+            $query->whereDate('start_date', $expectedStartDate);
+        } else {
+            if ($year && $month && $month !== 'all') {
+                $monthDates = $this->resolveMonthStartDates((int) $year, (int) $month);
+                $query->whereIn(DB::raw('DATE(start_date)'), $monthDates);
+            } elseif ($year) {
+                $query->whereYear('start_date', $year);
+            }
 
-        if ($month && $month !== 'all') {
-            $query->whereMonth('start_date', $month);
-        }
-
-        if ($week !== null && $week !== '') {
-            $query->where('week_number', (int) $week);
+            if ($week !== null && $week !== '') {
+                $query->where('week_number', (int) $week);
+            }
         }
 
         $plans = $query->orderBy('start_date', 'desc')->get();
@@ -59,15 +87,16 @@ class WeeklyActionPlanController extends Controller
         $startDate = Carbon::parse($validated['start_date'])->startOfWeek();
         $endDate = $startDate->copy()->endOfWeek();
 
-        // Prevent duplicate creation for the same user, year, month, and week number
+        // Match by exact Monday start_date so boundary weeks (like 28/09/2026) never collide
         $existing = $user->weeklyActionPlans()
             ->with('dailyMetrics')
-            ->where('week_number', $validated['week_number'])
-            ->whereYear('start_date', $startDate->year)
-            ->whereMonth('start_date', $startDate->month)
+            ->whereDate('start_date', $startDate->format('Y-m-d'))
             ->first();
 
         if ($existing) {
+            if ((int) $existing->week_number !== (int) $validated['week_number']) {
+                $existing->update(['week_number' => (int) $validated['week_number']]);
+            }
             return new WeeklyPlanResource($existing);
         }
 
@@ -124,7 +153,7 @@ class WeeklyActionPlanController extends Controller
         }
 
         $validated = $request->validate([
-            'week_number' => 'sometimes|integer|min:1',
+            'week_number' => 'sometimes|integer|min:1|max:5',
             'target_completed_training' => 'nullable|integer|min:0',
             'target_completed_onboarding' => 'nullable|integer|min:0',
             'target_graduated' => 'nullable|integer|min:0',
@@ -149,7 +178,7 @@ class WeeklyActionPlanController extends Controller
         }
 
         $validated = $request->validate([
-            'week_number' => 'required|integer|min:1',
+            'week_number' => 'required|integer|min:1|max:5',
             'target_completed_training' => 'nullable|integer|min:0',
             'target_completed_onboarding' => 'nullable|integer|min:0',
             'target_graduated' => 'nullable|integer|min:0',
@@ -164,8 +193,10 @@ class WeeklyActionPlanController extends Controller
         $actionType = $validated['action_type'] ?? 'create_new';
         $user = $request->user();
 
+        // Scope by start_date so completing a week never overwrites another month's week
         $existingPlan = $user->weeklyActionPlans()
             ->where('week_number', $targetWeekNumber)
+            ->whereDate('start_date', $weeklyPlan->start_date->format('Y-m-d'))
             ->where('id', '!=', $weeklyPlan->id)
             ->where('is_completed', true)
             ->first();
@@ -231,19 +262,28 @@ class WeeklyActionPlanController extends Controller
             return new WeeklyPlanResource($activePlan);
         }
 
-        $maxWeekNumber = $user->weeklyActionPlans()->max('week_number') ?? 0;
-        $nextWeekNumber = ($maxWeekNumber % 4) + 1;
-
         $latestCompleted = $user->weeklyActionPlans()
             ->where('is_completed', true)
             ->latest('end_date')
             ->first();
 
         $startDate = $latestCompleted
-            ? Carbon::parse($latestCompleted->end_date)->addDay()
+            ? Carbon::parse($latestCompleted->end_date)->addDay()->startOfWeek()
             : Carbon::now()->startOfWeek();
 
         $endDate = $startDate->copy()->endOfWeek();
+
+        // Derive the week number (1-5) from the week's end_date month so it never wraps 26/10/2026 to Week 1
+        $nextWeekNumber = min((int) ceil($endDate->day / 7), 5);
+
+        $existingForDate = $user->weeklyActionPlans()
+            ->with('dailyMetrics')
+            ->whereDate('start_date', $startDate->format('Y-m-d'))
+            ->first();
+
+        if ($existingForDate) {
+            return new WeeklyPlanResource($existingForDate);
+        }
 
         $newPlan = DB::transaction(function () use ($user, $startDate, $endDate, $nextWeekNumber) {
             $plan = $user->weeklyActionPlans()->create([
@@ -281,34 +321,106 @@ class WeeklyActionPlanController extends Controller
     }
 
     // --- Admin: Get specific team member's weekly plan ---
-   public function getMemberPlan(Request $request): JsonResponse
-{
-    $validated = $request->validate([
-        'user_id'     => 'required',
-        'year'        => 'required|integer',
-        'month'       => 'required|integer|between:1,12',
-        'week_number' => 'required|integer|between:1,5',
-    ]);
+    public function getMemberPlan(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'user_id'     => 'required',
+            'year'        => 'required|integer',
+            'month'       => 'required|integer|between:1,12',
+            'week_number' => 'required|integer|between:1,5',
+        ]);
 
-    $year = $validated['year'];
-    $month = $validated['month'];
-    $weekNumber = $validated['week_number'];
+        $year = (int) $validated['year'];
+        $month = (int) $validated['month'];
+        $weekNumber = (int) $validated['week_number'];
+        $expectedStartDate = $this->resolveExpectedStartDate($year, $month, $weekNumber);
 
-    // --- CASE 1: All Users Combined Mode ---
-    if ($validated['user_id'] === 'all') {
-        $plans = WeeklyActionPlan::with('dailyMetrics')
-            ->whereYear('start_date', $year)
-            ->whereMonth('start_date', $month)
-            ->where('week_number', $weekNumber)
-            ->get();
+        // --- CASE 1: All Users Combined Mode ---
+        if ($validated['user_id'] === 'all') {
+            $plans = WeeklyActionPlan::with('dailyMetrics')
+                ->whereDate('start_date', $expectedStartDate)
+                ->get();
 
-        $targetTraining = 90;
-        $targetOnboarding = 81;
-        $targetGraduated = 81;
+            $targetTraining = 90;
+            $targetOnboarding = 81;
+            $targetGraduated = 81;
 
-        $actualTraining = 0;
-        $actualOnboarding = 0;
-        $actualGraduated = 0;
+            $actualTraining = 0;
+            $actualOnboarding = 0;
+            $actualGraduated = 0;
+
+            $categoryTotals = [
+                'Company Information' => 0,
+                'System Analysis' => 0,
+                'Configure HR Policy' => 0,
+                'Provide Lesson (Path)' => 0,
+            ];
+
+            $aggregatedDays = [];
+
+            foreach ($plans as $plan) {
+                foreach ($plan->dailyMetrics as $m) {
+                    $actualTraining += $m->train_completed ?? 0;
+                    $actualOnboarding += $m->onboard_success ?? 0;
+                    $actualGraduated += ($m->grad_certificate ?? 0) + ($m->grad_hr_policy ?? 0) + ($m->grad_book ?? 0);
+
+                    $categoryTotals['Company Information'] += $m->onboard_company_info ?? 0;
+                    $categoryTotals['System Analysis'] += $m->onboard_system_analysis ?? 0;
+                    $categoryTotals['Configure HR Policy'] += $m->onboard_configure_hr ?? 0;
+                    $categoryTotals['Provide Lesson (Path)'] += $m->onboard_provide_lesson ?? 0;
+
+                    $dayName = $m->day_name ?? 'Unknown';
+                    if (!isset($aggregatedDays[$dayName])) {
+                        $aggregatedDays[$dayName] = [
+                            'id' => $dayName,
+                            'day_name' => $dayName,
+                            'record_date' => $m->record_date,
+                            'train_expected' => 0,
+                            'train_completed' => 0,
+                            'train_cancel_delay' => 0,
+                            'onboard_success' => 0,
+                            'grad_book' => 0,
+                        ];
+                    }
+
+                    $aggregatedDays[$dayName]['train_expected'] += $m->train_expected ?? 0;
+                    $aggregatedDays[$dayName]['train_completed'] += $m->train_completed ?? 0;
+                    $aggregatedDays[$dayName]['train_cancel_delay'] += $m->train_cancel_delay ?? 0;
+                    $aggregatedDays[$dayName]['onboard_success'] += $m->onboard_success ?? 0;
+                    $aggregatedDays[$dayName]['grad_book'] += ($m->grad_certificate ?? 0) + ($m->grad_hr_policy ?? 0) + ($m->grad_book ?? 0);
+                }
+            }
+
+            return response()->json([
+                'success' => true,
+                'is_all_users' => true,
+                'target_user' => [
+                    'name' => 'All Team Members',
+                    'email' => 'Company-wide aggregate view',
+                    'role' => 'team',
+                ],
+                'plan' => [
+                    'target_completed_training' => $targetTraining,
+                    'target_completed_onboarding' => $targetOnboarding,
+                    'target_graduated' => $targetGraduated,
+                    'actual_training' => $actualTraining,
+                    'actual_onboarding' => $actualOnboarding,
+                    'actual_graduated' => $actualGraduated,
+                    'category_totals' => $categoryTotals,
+                    'start_date' => $plans->min('start_date'),
+                    'end_date' => $plans->max('end_date'),
+                    'daily_metrics' => array_values($aggregatedDays),
+                ]
+            ]);
+        }
+
+        // --- CASE 2: Single User Mode ---
+        $targetUser = User::select('id', 'name', 'email', 'role')->findOrFail($validated['user_id']);
+
+        $plan = WeeklyActionPlan::with('dailyMetrics')
+            ->where('user_id', $validated['user_id'])
+            ->whereDate('start_date', $expectedStartDate)
+            ->first();
 
         $categoryTotals = [
             'Company Information' => 0,
@@ -317,305 +429,123 @@ class WeeklyActionPlanController extends Controller
             'Provide Lesson (Path)' => 0,
         ];
 
-        $aggregatedDays = [];
-
-        foreach ($plans as $plan) {
+        if ($plan && $plan->dailyMetrics) {
             foreach ($plan->dailyMetrics as $m) {
-                $actualTraining += $m->train_completed ?? 0;
-                $actualOnboarding += $m->onboard_success ?? 0;
-
-                // 💡 Sum all graduation types instead of just grad_book
-                $actualGraduated += ($m->grad_certificate ?? 0) + ($m->grad_hr_policy ?? 0) + ($m->grad_book ?? 0);
-
                 $categoryTotals['Company Information'] += $m->onboard_company_info ?? 0;
                 $categoryTotals['System Analysis'] += $m->onboard_system_analysis ?? 0;
                 $categoryTotals['Configure HR Policy'] += $m->onboard_configure_hr ?? 0;
                 $categoryTotals['Provide Lesson (Path)'] += $m->onboard_provide_lesson ?? 0;
-
-                $dayName = $m->day_name ?? 'Unknown';
-                if (!isset($aggregatedDays[$dayName])) {
-                    $aggregatedDays[$dayName] = [
-                        'id' => $dayName,
-                        'day_name' => $dayName,
-                        'record_date' => $m->record_date,
-                        'train_expected' => 0,
-                        'train_completed' => 0,
-                        'train_cancel_delay' => 0,
-                        'onboard_success' => 0,
-                        'grad_book' => 0,
-                    ];
-                }
-
-                $aggregatedDays[$dayName]['train_expected'] += $m->train_expected ?? 0;
-                $aggregatedDays[$dayName]['train_completed'] += $m->train_completed ?? 0;
-                $aggregatedDays[$dayName]['train_cancel_delay'] += $m->train_cancel_delay ?? 0;
-                $aggregatedDays[$dayName]['onboard_success'] += $m->onboard_success ?? 0;
-
-                // 💡 Update aggregated day count too
-                $aggregatedDays[$dayName]['grad_book'] += ($m->grad_certificate ?? 0) + ($m->grad_hr_policy ?? 0) + ($m->grad_book ?? 0);
             }
+        }
+
+        $planResource = $plan ? (new WeeklyPlanResource($plan))->resolve() : null;
+        if ($planResource) {
+            $planResource['category_totals'] = $categoryTotals;
         }
 
         return response()->json([
             'success' => true,
-            'is_all_users' => true,
-            'target_user' => [
-                'name' => 'All Team Members',
-                'email' => 'Company-wide aggregate view',
-                'role' => 'team',
-            ],
-            'plan' => [
-                'target_completed_training' => $targetTraining,
-                'target_completed_onboarding' => $targetOnboarding,
-                'target_graduated' => $targetGraduated,
-                'actual_training' => $actualTraining,
-                'actual_onboarding' => $actualOnboarding,
-                'actual_graduated' => $actualGraduated,
-                'category_totals' => $categoryTotals,
-                'start_date' => $plans->min('start_date'),
-                'end_date' => $plans->max('end_date'),
-                'daily_metrics' => array_values($aggregatedDays),
-            ]
+            'is_all_users' => false,
+            'target_user' => $targetUser,
+            'plan' => $planResource,
         ]);
     }
 
-    // --- CASE 2: Single User Mode ---
-    $targetUser = User::select('id', 'name', 'email', 'role')->findOrFail($validated['user_id']);
-
-    $plan = WeeklyActionPlan::with('dailyMetrics')
-        ->where('user_id', $validated['user_id'])
-        ->whereYear('start_date', $year)
-        ->whereMonth('start_date', $month)
-        ->where('week_number', $weekNumber)
-        ->first();
-
-    $categoryTotals = [
-        'Company Information' => 0,
-        'System Analysis' => 0,
-        'Configure HR Policy' => 0,
-        'Provide Lesson (Path)' => 0,
-    ];
-
-    if ($plan && $plan->dailyMetrics) {
-        foreach ($plan->dailyMetrics as $m) {
-            $categoryTotals['Company Information'] += $m->onboard_company_info ?? 0;
-            $categoryTotals['System Analysis'] += $m->onboard_system_analysis ?? 0;
-            $categoryTotals['Configure HR Policy'] += $m->onboard_configure_hr ?? 0;
-            $categoryTotals['Provide Lesson (Path)'] += $m->onboard_provide_lesson ?? 0;
-        }
-    }
-
-    $planResource = $plan ? (new WeeklyPlanResource($plan))->resolve() : null;
-    if ($planResource) {
-        $planResource['category_totals'] = $categoryTotals;
-    }
-
-    return response()->json([
-        'success' => true,
-        'is_all_users' => false,
-        'target_user' => $targetUser,
-        'plan' => $planResource,
-    ]);
-}
-
-public function companySummary(Request $request): JsonResponse
-{
-    $validated = $request->validate([
-        'start_date'  => 'nullable|date',
-        'end_date'    => 'nullable|date',
-        'year'        => 'nullable|integer',
-        'month'       => 'nullable|integer|between:1,12',
-        'week_number' => 'nullable|integer|between:1,5',
-    ]);
-
-    $startDate = $validated['start_date'] ?? null;
-    $endDate = $validated['end_date'] ?? null;
-    $year = $validated['year'] ?? ($startDate ? date('Y', strtotime($startDate)) : now()->year);
-    $month = $validated['month'] ?? ($startDate ? date('m', strtotime($startDate)) : null);
-    $weekNumber = $validated['week_number'] ?? 1;
-
-    // 💡 Main query supporting either custom date range or standard filters
-    $query = WeeklyActionPlan::with(['user:id,name,email', 'dailyMetrics']);
-
-    if ($startDate && $endDate) {
-        $query->where(function($q) use ($startDate, $endDate) {
-            $q->whereBetween('start_date', [$startDate, $endDate])
-              ->orWhereBetween('end_date', [$startDate, $endDate])
-              ->orWhere(function($sub) use ($startDate, $endDate) {
-                  $sub->where('start_date', '<=', $startDate)
-                      ->where('end_date', '>=', $endDate);
-              });
-        });
-    } else {
-        $query->whereYear('start_date', $year);
-        if (!empty($month)) {
-            $query->whereMonth('start_date', $month);
-        }
-        if (!empty($weekNumber)) {
-            $query->where('week_number', $weekNumber);
-        }
-    }
-
-    $plans = $query->get();
-
-    $totalActualTraining = 0;
-    $totalActualOnboarding = 0;
-    $totalActualGraduated = 0;
-    $totalDelaysCancels = 0;
-
-    // Map member breakdown with individual defaults (10, 9, 9)
-    $memberBreakdown = User::all()->map(function ($user) use ($startDate, $endDate, $year, $month, $weekNumber) {
-        $userPlansQuery = $user->weeklyActionPlans()->with('dailyMetrics');
-
-        if ($startDate && $endDate) {
-            $userPlansQuery->where(function($q) use ($startDate, $endDate) {
-                $q->whereBetween('start_date', [$startDate, $endDate])
-                  ->orWhereBetween('end_date', [$startDate, $endDate])
-                  ->orWhere(function($sub) use ($startDate, $endDate) {
-                      $sub->where('start_date', '<=', $startDate)
-                          ->where('end_date', '>=', $endDate);
-                  });
-            });
-        } else {
-            $userPlansQuery->when($year, fn($q) => $q->whereYear('start_date', $year))
-                           ->when($month, fn($q) => $q->whereMonth('start_date', $month))
-                           ->when($weekNumber, fn($q) => $q->where('week_number', $weekNumber));
-        }
-
-        $userPlans = $userPlansQuery->get();
-
-        $savedTraining = $userPlans->sum('target_completed_training');
-        $savedOnboarding = $userPlans->sum('target_completed_onboarding');
-        $savedGraduated = $userPlans->sum('target_graduated');
-
-        $tTarget = $savedTraining > 0 ? $savedTraining : 10;
-        $oTarget = $savedOnboarding > 0 ? $savedOnboarding : 9;
-        $gTarget = $savedGraduated > 0 ? $savedGraduated : 9;
-
-        $tActual = 0;
-        $oActual = 0;
-        $gActual = 0;
-
-        foreach ($userPlans as $p) {
-            foreach ($p->dailyMetrics as $m) {
-                $tActual += $m->train_completed ?? 0;
-                $oActual += $m->onboard_success ?? 0;
-                $gActual += ($m->grad_certificate ?? 0) + ($m->grad_hr_policy ?? 0) + ($m->grad_book ?? 0);
-            }
-        }
-
-        return [
-            'user_id' => $user->id,
-            'user_name' => $user->name,
-            'user_email' => $user->email,
-            'target_training' => $tTarget,
-            'actual_training' => $tActual,
-            'target_onboarding' => $oTarget,
-            'actual_onboarding' => $oActual,
-            'target_graduated' => $gTarget,
-            'actual_graduated' => $gActual,
-        ];
-    })->values();
-
-    // Explicit Company-Wide Targets
-    $totalTargetTraining = 90;
-    $totalTargetOnboarding = 81;
-    $totalTargetGraduated = 81;
-
-    foreach ($plans as $plan) {
-        foreach ($plan->dailyMetrics as $metric) {
-            $totalActualTraining += $metric->train_completed ?? 0;
-            $totalActualOnboarding += $metric->onboard_success ?? 0;
-            $totalActualGraduated += ($metric->grad_certificate ?? 0) + ($metric->grad_hr_policy ?? 0) + ($metric->grad_book ?? 0);
-            $totalDelaysCancels += $metric->train_cancel_delay ?? 0;
-        }
-    }
-
-    // Real database category and graduation breakdowns
-    $categoryTotals = [
-        'Company Information' => $plans->sum(fn($p) => $p->dailyMetrics->sum('onboard_company_info')),
-        'System Analysis' => $plans->sum(fn($p) => $p->dailyMetrics->sum('onboard_system_analysis')),
-        'Configure HR Policy' => $plans->sum(fn($p) => $p->dailyMetrics->sum('onboard_configure_hr')),
-        'Provide Lesson (Path)' => $plans->sum(fn($p) => $p->dailyMetrics->sum('onboard_provide_lesson')),
-    ];
-
-    $gradBreakdown = [
-        'certificate' => $plans->sum(fn($p) => $p->dailyMetrics->sum('grad_certificate')),
-        'hr_policy' => $plans->sum(fn($p) => $p->dailyMetrics->sum('grad_hr_policy')),
-        'book' => $plans->sum(fn($p) => $p->dailyMetrics->sum('grad_book')),
-    ];
-
-    // Fetch independent notes strictly from the TeamSummaryNote table
-    $summaryNote = TeamSummaryNote::where('year', $year)
-        ->when($month, fn($q) => $q->where('month', $month))
-        ->where('week_number', $weekNumber)
-        ->first();
-
-    $notes = [
-        'what_worked' => $summaryNote?->what_worked ?? '',
-        'what_didnt_work' => $summaryNote?->what_didnt_work ?? '',
-        'what_to_improve' => $summaryNote?->what_to_improve ?? '',
-        'what_is_next' => $summaryNote?->what_is_next ?? '',
-    ];
-
-    return response()->json([
-        'success' => true,
-        // 💡 Pass back the exact date range so the template prints "DD/MM/YYYY to DD/MM/YYYY" accurately
-        'date_range' => [
-            'start' => $startDate ?? ($plans->min('start_date') ?? now()->toDateString()),
-            'end' => $endDate ?? ($plans->max('end_date') ?? now()->toDateString()),
-        ],
-        'summary' => [
-            'total_plans' => $plans->count(),
-            'targets' => [
-                'training' => $totalTargetTraining,
-                'onboarding' => $totalTargetOnboarding,
-                'graduated' => $totalTargetGraduated,
-            ],
-            'actuals' => [
-                'training' => $totalActualTraining,
-                'onboarding' => $totalActualOnboarding,
-                'graduated' => $totalActualGraduated,
-                'delays_cancels' => $totalDelaysCancels,
-            ],
-        ],
-        'category_tags' => $categoryTotals,
-        'category_totals' => $categoryTotals,
-        'graduation_breakdown' => $gradBreakdown,
-        'notes' => $notes,
-        'members' => $memberBreakdown,
-    ]);
-}
-
-    public function saveSummaryNotes(Request $request): JsonResponse
+    public function companySummary(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'year' => 'required|integer',
-            'month' => 'required|integer|between:1,12',
-            'week_number' => 'required|integer|between:1,5',
-            'what_worked' => 'nullable|string',
-            'what_didnt_work' => 'nullable|string',
-            'what_to_improve' => 'nullable|string',
-            'what_is_next' => 'nullable|string',
+            'year'        => 'required|integer',
+            'month'       => 'nullable|integer|between:1,12',
+            'week_number' => 'nullable|integer|between:1,5',
         ]);
 
-        TeamSummaryNote::updateOrCreate(
-            [
-                'year' => $validated['year'],
-                'month' => $validated['month'],
-                'week_number' => $validated['week_number'],
-            ],
-            [
-                'what_worked' => $validated['what_worked'] ?? null,
-                'what_didnt_work' => $validated['what_didnt_work'] ?? null,
-                'what_to_improve' => $validated['what_to_improve'] ?? null,
-                'what_is_next' => $validated['what_is_next'] ?? null,
-            ]
-        );
+        $year = (int) $validated['year'];
+        $month = !empty($validated['month']) ? (int) $validated['month'] : null;
+        $weekNumber = !empty($validated['week_number']) ? (int) $validated['week_number'] : null;
+
+        $query = WeeklyActionPlan::with(['user:id,name,email', 'dailyMetrics']);
+
+        if ($year && $month && $weekNumber) {
+            $expectedStartDate = $this->resolveExpectedStartDate($year, $month, $weekNumber);
+            $query->whereDate('start_date', $expectedStartDate);
+        } elseif ($year && $month) {
+            $monthDates = $this->resolveMonthStartDates($year, $month);
+            $query->whereIn(DB::raw('DATE(start_date)'), $monthDates);
+        } else {
+            $query->whereYear('start_date', $year);
+            if ($weekNumber) {
+                $query->where('week_number', $weekNumber);
+            }
+        }
+
+        $plans = $query->get();
+
+        $totalTargetTraining = $plans->sum('target_completed_training');
+        $totalTargetOnboarding = $plans->sum('target_completed_onboarding');
+        $totalTargetGraduated = $plans->sum('target_graduated');
+
+        $totalActualTraining = 0;
+        $totalActualOnboarding = 0;
+        $totalActualGraduated = 0;
+        $totalDelaysCancels = 0;
+
+        $memberBreakdown = $plans->groupBy('user_id')->map(function ($userPlans) {
+            $user = $userPlans->first()->user;
+            $tTarget = $userPlans->sum('target_completed_training');
+            $oTarget = $userPlans->sum('target_completed_onboarding');
+            $gTarget = $userPlans->sum('target_graduated');
+
+            $tActual = 0;
+            $oActual = 0;
+            $gActual = 0;
+
+            foreach ($userPlans as $p) {
+                foreach ($p->dailyMetrics as $m) {
+                    $tActual += $m->train_completed ?? 0;
+                    $oActual += $m->onboard_success ?? 0;
+                    $gActual += $m->grad_book ?? 0;
+                }
+            }
+
+            return [
+                'user_id' => $user?->id,
+                'user_name' => $user?->name ?? 'Unknown',
+                'user_email' => $user?->email ?? '',
+                'target_training' => $tTarget,
+                'actual_training' => $tActual,
+                'target_onboarding' => $oTarget,
+                'actual_onboarding' => $oActual,
+                'target_graduated' => $gTarget,
+                'actual_graduated' => $gActual,
+            ];
+        })->values();
+
+        foreach ($plans as $plan) {
+            foreach ($plan->dailyMetrics as $metric) {
+                $totalActualTraining += $metric->train_completed ?? 0;
+                $totalActualOnboarding += $metric->onboard_success ?? 0;
+                $totalActualGraduated += ($metric->grad_certificate ?? 0) + ($metric->grad_hr_policy ?? 0) + ($metric->grad_book ?? 0);
+                $totalDelaysCancels += $metric->train_cancel_delay ?? 0;
+            }
+        }
 
         return response()->json([
             'success' => true,
-            'message' => 'Weekly summary notes saved successfully!',
+            'summary' => [
+                'total_plans' => $plans->count(),
+                'targets' => [
+                    'training' => $totalTargetTraining,
+                    'onboarding' => $totalTargetOnboarding,
+                    'graduated' => $totalTargetGraduated,
+                ],
+                'actuals' => [
+                    'training' => $totalActualTraining,
+                    'onboarding' => $totalActualOnboarding,
+                    'graduated' => $totalActualGraduated,
+                    'delays_cancels' => $totalDelaysCancels,
+                ],
+            ],
+            'members' => $memberBreakdown,
         ]);
     }
 }
