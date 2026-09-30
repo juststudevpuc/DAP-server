@@ -419,141 +419,173 @@ class WeeklyActionPlanController extends Controller
 }
 
 public function companySummary(Request $request): JsonResponse
-    {
-        $validated = $request->validate([
-            'year'        => 'required|integer',
-            'month'       => 'nullable|integer|between:1,12',
-            'week_number' => 'nullable|integer|between:1,5',
-        ]);
+{
+    $validated = $request->validate([
+        'start_date'  => 'nullable|date',
+        'end_date'    => 'nullable|date',
+        'year'        => 'nullable|integer',
+        'month'       => 'nullable|integer|between:1,12',
+        'week_number' => 'nullable|integer|between:1,5',
+    ]);
 
-        $year = $validated['year'];
-        $month = $validated['month'] ?? null;
-        $weekNumber = $validated['week_number'] ?? null;
+    $startDate = $validated['start_date'] ?? null;
+    $endDate = $validated['end_date'] ?? null;
+    $year = $validated['year'] ?? ($startDate ? date('Y', strtotime($startDate)) : now()->year);
+    $month = $validated['month'] ?? ($startDate ? date('m', strtotime($startDate)) : null);
+    $weekNumber = $validated['week_number'] ?? 1;
 
-        $query = WeeklyActionPlan::with(['user:id,name,email', 'dailyMetrics'])
-            ->whereYear('start_date', $year);
+    // 💡 Main query supporting either custom date range or standard filters
+    $query = WeeklyActionPlan::with(['user:id,name,email', 'dailyMetrics']);
 
+    if ($startDate && $endDate) {
+        $query->where(function($q) use ($startDate, $endDate) {
+            $q->whereBetween('start_date', [$startDate, $endDate])
+              ->orWhereBetween('end_date', [$startDate, $endDate])
+              ->orWhere(function($sub) use ($startDate, $endDate) {
+                  $sub->where('start_date', '<=', $startDate)
+                      ->where('end_date', '>=', $endDate);
+              });
+        });
+    } else {
+        $query->whereYear('start_date', $year);
         if (!empty($month)) {
             $query->whereMonth('start_date', $month);
         }
-
         if (!empty($weekNumber)) {
             $query->where('week_number', $weekNumber);
         }
+    }
 
-        $plans = $query->get();
+    $plans = $query->get();
 
-        $totalActualTraining = 0;
-        $totalActualOnboarding = 0;
-        $totalActualGraduated = 0;
-        $totalDelaysCancels = 0;
+    $totalActualTraining = 0;
+    $totalActualOnboarding = 0;
+    $totalActualGraduated = 0;
+    $totalDelaysCancels = 0;
 
-        // Map member breakdown with individual defaults (10, 9, 9)
-        $memberBreakdown = User::all()->map(function ($user) use ($year, $month, $weekNumber) {
-            $userPlans = $user->weeklyActionPlans()
-                ->when($year, fn($q) => $q->whereYear('start_date', $year))
-                ->when($month, fn($q) => $q->whereMonth('start_date', $month))
-                ->when($weekNumber, fn($q) => $q->where('week_number', $weekNumber))
-                ->with('dailyMetrics')
-                ->get();
+    // Map member breakdown with individual defaults (10, 9, 9)
+    $memberBreakdown = User::all()->map(function ($user) use ($startDate, $endDate, $year, $month, $weekNumber) {
+        $userPlansQuery = $user->weeklyActionPlans()->with('dailyMetrics');
 
-            $savedTraining = $userPlans->sum('target_completed_training');
-            $savedOnboarding = $userPlans->sum('target_completed_onboarding');
-            $savedGraduated = $userPlans->sum('target_graduated');
+        if ($startDate && $endDate) {
+            $userPlansQuery->where(function($q) use ($startDate, $endDate) {
+                $q->whereBetween('start_date', [$startDate, $endDate])
+                  ->orWhereBetween('end_date', [$startDate, $endDate])
+                  ->orWhere(function($sub) use ($startDate, $endDate) {
+                      $sub->where('start_date', '<=', $startDate)
+                          ->where('end_date', '>=', $endDate);
+                  });
+            });
+        } else {
+            $userPlansQuery->when($year, fn($q) => $q->whereYear('start_date', $year))
+                           ->when($month, fn($q) => $q->whereMonth('start_date', $month))
+                           ->when($weekNumber, fn($q) => $q->where('week_number', $weekNumber));
+        }
 
-            $tTarget = $savedTraining > 0 ? $savedTraining : 10;
-            $oTarget = $savedOnboarding > 0 ? $savedOnboarding : 9;
-            $gTarget = $savedGraduated > 0 ? $savedGraduated : 9;
+        $userPlans = $userPlansQuery->get();
 
-            $tActual = 0;
-            $oActual = 0;
-            $gActual = 0;
+        $savedTraining = $userPlans->sum('target_completed_training');
+        $savedOnboarding = $userPlans->sum('target_completed_onboarding');
+        $savedGraduated = $userPlans->sum('target_graduated');
 
-            foreach ($userPlans as $p) {
-                foreach ($p->dailyMetrics as $m) {
-                    $tActual += $m->train_completed ?? 0;
-                    $oActual += $m->onboard_success ?? 0;
-                    $gActual += ($m->grad_certificate ?? 0) + ($m->grad_hr_policy ?? 0) + ($m->grad_book ?? 0);
-                }
-            }
+        $tTarget = $savedTraining > 0 ? $savedTraining : 10;
+        $oTarget = $savedOnboarding > 0 ? $savedOnboarding : 9;
+        $gTarget = $savedGraduated > 0 ? $savedGraduated : 9;
 
-            return [
-                'user_id' => $user->id,
-                'user_name' => $user->name,
-                'user_email' => $user->email,
-                'target_training' => $tTarget,
-                'actual_training' => $tActual,
-                'target_onboarding' => $oTarget,
-                'actual_onboarding' => $oActual,
-                'target_graduated' => $gTarget,
-                'actual_graduated' => $gActual,
-            ];
-        })->values();
+        $tActual = 0;
+        $oActual = 0;
+        $gActual = 0;
 
-        // Explicit Company-Wide Targets
-        $totalTargetTraining = 90;
-        $totalTargetOnboarding = 81;
-        $totalTargetGraduated = 81;
-
-        foreach ($plans as $plan) {
-            foreach ($plan->dailyMetrics as $metric) {
-                $totalActualTraining += $metric->train_completed ?? 0;
-                $totalActualOnboarding += $metric->onboard_success ?? 0;
-                $totalActualGraduated += ($metric->grad_certificate ?? 0) + ($metric->grad_hr_policy ?? 0) + ($metric->grad_book ?? 0);
-                $totalDelaysCancels += $metric->train_cancel_delay ?? 0;
+        foreach ($userPlans as $p) {
+            foreach ($p->dailyMetrics as $m) {
+                $tActual += $m->train_completed ?? 0;
+                $oActual += $m->onboard_success ?? 0;
+                $gActual += ($m->grad_certificate ?? 0) + ($m->grad_hr_policy ?? 0) + ($m->grad_book ?? 0);
             }
         }
 
-        // Real database category and graduation breakdowns
-        $categoryTotals = [
-            'Company Information' => $plans->sum(fn($p) => $p->dailyMetrics->sum('onboard_company_info')),
-            'System Analysis' => $plans->sum(fn($p) => $p->dailyMetrics->sum('onboard_system_analysis')),
-            'Configure HR Policy' => $plans->sum(fn($p) => $p->dailyMetrics->sum('onboard_configure_hr')),
-            'Provide Lesson (Path)' => $plans->sum(fn($p) => $p->dailyMetrics->sum('onboard_provide_lesson')),
+        return [
+            'user_id' => $user->id,
+            'user_name' => $user->name,
+            'user_email' => $user->email,
+            'target_training' => $tTarget,
+            'actual_training' => $tActual,
+            'target_onboarding' => $oTarget,
+            'actual_onboarding' => $oActual,
+            'target_graduated' => $gTarget,
+            'actual_graduated' => $gActual,
         ];
+    })->values();
 
-        $gradBreakdown = [
-            'certificate' => $plans->sum(fn($p) => $p->dailyMetrics->sum('grad_certificate')),
-            'hr_policy' => $plans->sum(fn($p) => $p->dailyMetrics->sum('grad_hr_policy')),
-            'book' => $plans->sum(fn($p) => $p->dailyMetrics->sum('grad_book')),
-        ];
+    // Explicit Company-Wide Targets
+    $totalTargetTraining = 90;
+    $totalTargetOnboarding = 81;
+    $totalTargetGraduated = 81;
 
-        // 💡 Fetch independent notes strictly from the TeamSummaryNote table
-        $summaryNote = TeamSummaryNote::where('year', $year)
-            ->when($month, fn($q) => $q->where('month', $month))
-            ->where('week_number', $weekNumber)
-            ->first();
-
-        $notes = [
-            'what_worked' => $summaryNote?->what_worked ?? '',
-            'what_didnt_work' => $summaryNote?->what_didnt_work ?? '',
-            'what_to_improve' => $summaryNote?->what_to_improve ?? '',
-            'what_is_next' => $summaryNote?->what_is_next ?? '',
-        ];
-
-        return response()->json([
-            'success' => true,
-            'summary' => [
-                'total_plans' => $plans->count(),
-                'targets' => [
-                    'training' => $totalTargetTraining,
-                    'onboarding' => $totalTargetOnboarding,
-                    'graduated' => $totalTargetGraduated,
-                ],
-                'actuals' => [
-                    'training' => $totalActualTraining,
-                    'onboarding' => $totalActualOnboarding,
-                    'graduated' => $totalActualGraduated,
-                    'delays_cancels' => $totalDelaysCancels,
-                ],
-            ],
-            'category_tags' => $categoryTotals,
-            'category_totals' => $categoryTotals,
-            'graduation_breakdown' => $gradBreakdown,
-            'notes' => $notes,
-            'members' => $memberBreakdown,
-        ]);
+    foreach ($plans as $plan) {
+        foreach ($plan->dailyMetrics as $metric) {
+            $totalActualTraining += $metric->train_completed ?? 0;
+            $totalActualOnboarding += $metric->onboard_success ?? 0;
+            $totalActualGraduated += ($metric->grad_certificate ?? 0) + ($metric->grad_hr_policy ?? 0) + ($metric->grad_book ?? 0);
+            $totalDelaysCancels += $metric->train_cancel_delay ?? 0;
+        }
     }
+
+    // Real database category and graduation breakdowns
+    $categoryTotals = [
+        'Company Information' => $plans->sum(fn($p) => $p->dailyMetrics->sum('onboard_company_info')),
+        'System Analysis' => $plans->sum(fn($p) => $p->dailyMetrics->sum('onboard_system_analysis')),
+        'Configure HR Policy' => $plans->sum(fn($p) => $p->dailyMetrics->sum('onboard_configure_hr')),
+        'Provide Lesson (Path)' => $plans->sum(fn($p) => $p->dailyMetrics->sum('onboard_provide_lesson')),
+    ];
+
+    $gradBreakdown = [
+        'certificate' => $plans->sum(fn($p) => $p->dailyMetrics->sum('grad_certificate')),
+        'hr_policy' => $plans->sum(fn($p) => $p->dailyMetrics->sum('grad_hr_policy')),
+        'book' => $plans->sum(fn($p) => $p->dailyMetrics->sum('grad_book')),
+    ];
+
+    // Fetch independent notes strictly from the TeamSummaryNote table
+    $summaryNote = TeamSummaryNote::where('year', $year)
+        ->when($month, fn($q) => $q->where('month', $month))
+        ->where('week_number', $weekNumber)
+        ->first();
+
+    $notes = [
+        'what_worked' => $summaryNote?->what_worked ?? '',
+        'what_didnt_work' => $summaryNote?->what_didnt_work ?? '',
+        'what_to_improve' => $summaryNote?->what_to_improve ?? '',
+        'what_is_next' => $summaryNote?->what_is_next ?? '',
+    ];
+
+    return response()->json([
+        'success' => true,
+        // 💡 Pass back the exact date range so the template prints "DD/MM/YYYY to DD/MM/YYYY" accurately
+        'date_range' => [
+            'start' => $startDate ?? ($plans->min('start_date') ?? now()->toDateString()),
+            'end' => $endDate ?? ($plans->max('end_date') ?? now()->toDateString()),
+        ],
+        'summary' => [
+            'total_plans' => $plans->count(),
+            'targets' => [
+                'training' => $totalTargetTraining,
+                'onboarding' => $totalTargetOnboarding,
+                'graduated' => $totalTargetGraduated,
+            ],
+            'actuals' => [
+                'training' => $totalActualTraining,
+                'onboarding' => $totalActualOnboarding,
+                'graduated' => $totalActualGraduated,
+                'delays_cancels' => $totalDelaysCancels,
+            ],
+        ],
+        'category_tags' => $categoryTotals,
+        'category_totals' => $categoryTotals,
+        'graduation_breakdown' => $gradBreakdown,
+        'notes' => $notes,
+        'members' => $memberBreakdown,
+    ]);
+}
 
     public function saveSummaryNotes(Request $request): JsonResponse
     {
