@@ -16,27 +16,38 @@ class WeeklyActionPlanController extends Controller
     public function __construct(protected WeeklyPlanService $planService) {}
 
     /**
-     * Calculate the exact Monday start_date for a given Year, Month, and Week (1-5).
-     * Matches the frontend formula: startDay = min((week - 1) * 7 + 1, daysInMonth) -> startOfWeek()
+     * Calculate the Monday start_date for a given Year, Month, and Week (1-5).
+     * Rule: Sunday is a holiday. If the 1st is Sunday, Week 1 starts on Monday the 2nd.
      */
     private function resolveExpectedStartDate(int $year, int $month, int $week): string
     {
-        $daysInMonth = Carbon::createFromDate($year, $month, 1)->daysInMonth;
-        $startDay = min(($week - 1) * 7 + 1, $daysInMonth);
+        $firstDayOfMonth = Carbon::createFromDate($year, $month, 1)->startOfDay();
 
-        return Carbon::createFromDate($year, $month, $startDay)
-            ->startOfWeek()
-            ->format('Y-m-d');
+        // If the 1st of the month is Sunday (Holiday), first working day is Monday the 2nd
+        $firstWorkingDay = $firstDayOfMonth->isSunday()
+            ? $firstDayOfMonth->copy()->addDay()
+            : $firstDayOfMonth;
+
+        $week1Monday = $firstWorkingDay->copy()->startOfWeek(Carbon::MONDAY);
+
+        return $week1Monday->addWeeks($week - 1)->format('Y-m-d');
     }
 
     /**
-     * Get all unique Monday start_dates for Weeks 1-5 of a given Year and Month.
+     * Get all unique Monday start_dates belonging to this Month (excluding overlap with next month).
      */
     private function resolveMonthStartDates(int $year, int $month): array
     {
+        $nextMonth = $month === 12 ? 1 : $month + 1;
+        $nextMonthYear = $month === 12 ? $year + 1 : $year;
+        $nextMonthWeek1 = $this->resolveExpectedStartDate($nextMonthYear, $nextMonth, 1);
+
         $dates = [];
         for ($w = 1; $w <= 5; $w++) {
-            $dates[] = $this->resolveExpectedStartDate($year, $month, $w);
+            $d = $this->resolveExpectedStartDate($year, $month, $w);
+            if ($d !== $nextMonthWeek1) {
+                $dates[] = $d;
+            }
         }
         return array_values(array_unique($dates));
     }
@@ -51,8 +62,18 @@ class WeeklyActionPlanController extends Controller
         $query = $user->weeklyActionPlans()->with('dailyMetrics');
 
         if ($year && $month && $month !== 'all' && $week !== null && $week !== '') {
-            // Finds the exact Monday (e.g. 2026-09-28 for Oct Week 1) without touching any other rows
             $expectedStartDate = $this->resolveExpectedStartDate((int) $year, (int) $month, (int) $week);
+
+            // Safe auto-fix: if a row was previously saved with week_number = 1 when it should be 5,
+            // just update its week_number to 5 (never deletes any data!)
+            $week5StartDate = $this->resolveExpectedStartDate((int) $year, (int) $month, 5);
+            if ((int) $week === 1 && $week5StartDate !== $expectedStartDate) {
+                $user->weeklyActionPlans()
+                    ->where('week_number', 1)
+                    ->whereDate('start_date', $week5StartDate)
+                    ->update(['week_number' => 5]);
+            }
+
             $query->whereDate('start_date', $expectedStartDate);
         } else {
             if ($year && $month && $month !== 'all') {
@@ -87,7 +108,7 @@ class WeeklyActionPlanController extends Controller
         $startDate = Carbon::parse($validated['start_date'])->startOfWeek();
         $endDate = $startDate->copy()->endOfWeek();
 
-        // Match by exact Monday start_date so boundary weeks (like 28/09/2026) never collide
+        // Match by exact Monday start_date so boundary weeks never collide
         $existing = $user->weeklyActionPlans()
             ->with('dailyMetrics')
             ->whereDate('start_date', $startDate->format('Y-m-d'))
