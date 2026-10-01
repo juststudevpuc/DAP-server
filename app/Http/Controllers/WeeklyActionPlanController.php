@@ -510,6 +510,20 @@ class WeeklyActionPlanController extends Controller
         $totalActualGraduated = 0;
         $totalDelaysCancels = 0;
 
+        // 💡 NEW: Initialize arrays for breakdown totals
+        $categoryTotals = [
+            'Company Information' => 0,
+            'System Analysis' => 0,
+            'Configure HR Policy' => 0,
+            'Provide Lesson (Path)' => 0,
+        ];
+
+        $graduationBreakdown = [
+            'certificate' => 0,
+            'hr_policy' => 0,
+            'book' => 0,
+        ];
+
         $memberBreakdown = $plans->groupBy('user_id')->map(function ($userPlans) {
             $user = $userPlans->first()->user;
             $tTarget = $userPlans->sum('target_completed_training');
@@ -519,12 +533,38 @@ class WeeklyActionPlanController extends Controller
             $tActual = 0;
             $oActual = 0;
             $gActual = 0;
+            $delaysCancels = 0;
+
+            // 💡 ថ្មី៖ បង្កើត Array ដើម្បីផ្ទុកទិន្នន័យលម្អិតរបស់ User ម្នាក់ៗ
+            $catTotals = [
+                'company_info' => 0,
+                'system_analysis' => 0,
+                'hr_policy' => 0,
+                'lesson_path' => 0,
+            ];
+
+            $gradBreakdown = [
+                'certificate' => 0,
+                'hr_policy' => 0,
+                'book' => 0,
+            ];
 
             foreach ($userPlans as $p) {
                 foreach ($p->dailyMetrics as $m) {
                     $tActual += $m->train_completed ?? 0;
                     $oActual += $m->onboard_success ?? 0;
                     $gActual += $m->grad_book ?? 0;
+                    $delaysCancels += $m->train_cancel_delay ?? 0;
+
+                    // 💡 ថ្មី៖ បូកសរុបទិន្នន័យលម្អិតបញ្ចូលទៅក្នុង Array ខាងលើ
+                    $catTotals['company_info'] += $m->onboard_company_info ?? 0;
+                    $catTotals['system_analysis'] += $m->onboard_system_analysis ?? 0;
+                    $catTotals['hr_policy'] += $m->onboard_configure_hr ?? 0;
+                    $catTotals['lesson_path'] += $m->onboard_provide_lesson ?? 0;
+
+                    $gradBreakdown['certificate'] += $m->grad_certificate ?? 0;
+                    $gradBreakdown['hr_policy'] += $m->grad_hr_policy ?? 0;
+                    $gradBreakdown['book'] += $m->grad_book ?? 0;
                 }
             }
 
@@ -538,6 +578,9 @@ class WeeklyActionPlanController extends Controller
                 'actual_onboarding' => $oActual,
                 'target_graduated' => $gTarget,
                 'actual_graduated' => $gActual,
+                'delays_cancels' => $delaysCancels,
+                'category_totals' => $catTotals,          // 👈 បញ្ជូនទៅកាន់ React
+                'graduation_breakdown' => $gradBreakdown, // 👈 បញ្ជូនទៅកាន់ React
             ];
         })->values();
 
@@ -547,6 +590,16 @@ class WeeklyActionPlanController extends Controller
                 $totalActualOnboarding += $metric->onboard_success ?? 0;
                 $totalActualGraduated += ($metric->grad_certificate ?? 0) + ($metric->grad_hr_policy ?? 0) + ($metric->grad_book ?? 0);
                 $totalDelaysCancels += $metric->train_cancel_delay ?? 0;
+
+                // 💡 NEW: Add individual module totals
+                $categoryTotals['Company Information'] += $metric->onboard_company_info ?? 0;
+                $categoryTotals['System Analysis'] += $metric->onboard_system_analysis ?? 0;
+                $categoryTotals['Configure HR Policy'] += $metric->onboard_configure_hr ?? 0;
+                $categoryTotals['Provide Lesson (Path)'] += $metric->onboard_provide_lesson ?? 0;
+
+                $graduationBreakdown['certificate'] += $metric->grad_certificate ?? 0;
+                $graduationBreakdown['hr_policy'] += $metric->grad_hr_policy ?? 0;
+                $graduationBreakdown['book'] += $metric->grad_book ?? 0;
             }
         }
 
@@ -565,6 +618,9 @@ class WeeklyActionPlanController extends Controller
                     'graduated' => $totalActualGraduated,
                     'delays_cancels' => $totalDelaysCancels,
                 ],
+                // 💡 NEW: Send breakdowns to React
+                'category_totals' => $categoryTotals,
+                'graduation_breakdown' => $graduationBreakdown,
             ],
             'members' => $memberBreakdown,
         ]);
