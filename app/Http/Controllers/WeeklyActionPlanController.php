@@ -553,7 +553,7 @@ class WeeklyActionPlanController extends Controller
                 foreach ($p->dailyMetrics as $m) {
                     $tActual += $m->train_completed ?? 0;
                     $oActual += $m->onboard_success ?? 0;
-                    $gActual += $m->grad_book ?? 0;
+                    $gActual += $m->grad_certificate ?? 0;
                     $delaysCancels += $m->train_cancel_delay ?? 0;
 
                     // 💡 ថ្មី៖ បូកសរុបទិន្នន័យលម្អិតបញ្ចូលទៅក្នុង Array ខាងលើ
@@ -588,7 +588,8 @@ class WeeklyActionPlanController extends Controller
             foreach ($plan->dailyMetrics as $metric) {
                 $totalActualTraining += $metric->train_completed ?? 0;
                 $totalActualOnboarding += $metric->onboard_success ?? 0;
-                $totalActualGraduated += ($metric->grad_certificate ?? 0) + ($metric->grad_hr_policy ?? 0) + ($metric->grad_book ?? 0);
+                // $totalActualGraduated += ($metric->grad_certificate ?? 0) + ($metric->grad_hr_policy ?? 0) + ($metric->grad_book ?? 0);
+                $totalActualGraduated += $metric->grad_certificate ?? 0;
                 $totalDelaysCancels += $metric->train_cancel_delay ?? 0;
 
                 // 💡 NEW: Add individual module totals
