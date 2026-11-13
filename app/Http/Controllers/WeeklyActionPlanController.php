@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\WeeklyActionPlan;
+use App\Models\TeamSummaryNote;
 use App\Models\User;
 use Illuminate\Http\Request;
 use App\Services\WeeklyPlanService;
@@ -624,6 +625,38 @@ class WeeklyActionPlanController extends Controller
                 'graduation_breakdown' => $graduationBreakdown,
             ],
             'members' => $memberBreakdown,
+        ]);
+    }
+
+    public function saveSummaryNotes(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'year'             => 'required|integer',
+            'month'            => 'required|integer|between:1,12',
+            'week_number'      => 'required|integer|between:1,5',
+            'what_worked'      => 'sometimes|nullable|string',
+            'what_didnt_work'  => 'sometimes|nullable|string',
+            'what_to_improve'  => 'sometimes|nullable|string',
+            'what_is_next'     => 'sometimes|nullable|string',
+        ]);
+
+        $key = [
+            'year' => $validated['year'],
+            'month' => $validated['month'],
+            'week_number' => $validated['week_number'],
+        ];
+        $notes = array_intersect_key($validated, array_flip([
+            'what_worked',
+            'what_didnt_work',
+            'what_to_improve',
+            'what_is_next',
+        ]));
+
+        $note = TeamSummaryNote::updateOrCreate($key, $notes);
+
+        return response()->json([
+            'success' => true,
+            'note' => $note,
         ]);
     }
 }
