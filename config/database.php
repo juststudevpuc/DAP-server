@@ -32,6 +32,22 @@ return [
 
     'connections' => [
 
+        'aiven_mysql' => [
+            'driver' => 'mysql',
+            'host' => env('AIVEN_DB_HOST'),
+            'port' => env('AIVEN_DB_PORT', '3306'),
+            'database' => env('AIVEN_DB_DATABASE'),
+            'username' => env('AIVEN_DB_USERNAME'),
+            'password' => env('AIVEN_DB_PASSWORD'),
+            'charset' => 'utf8mb4',
+            'collation' => 'utf8mb4_unicode_ci',
+            'prefix' => '',
+            'strict' => false,
+            'options' => extension_loaded('pdo_mysql') ? array_filter([
+                (PHP_VERSION_ID >= 80500 ? Mysql::ATTR_SSL_CA : PDO::MYSQL_ATTR_SSL_CA) => env('AIVEN_SSL_CA'),
+            ]) : [],
+        ],
+
         'sqlite' => [
             'driver' => 'sqlite',
             'url' => env('DB_URL'),
@@ -149,7 +165,7 @@ return [
 
         'options' => [
             'cluster' => env('REDIS_CLUSTER', 'redis'),
-            'prefix' => env('REDIS_PREFIX', Str::slug((string) env('APP_NAME', 'laravel')).'-database-'),
+            'prefix' => env('REDIS_PREFIX', Str::slug((string) env('APP_NAME', 'laravel')) . '-database-'),
             'persistent' => env('REDIS_PERSISTENT', false),
         ],
 

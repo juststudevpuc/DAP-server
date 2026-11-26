@@ -2,18 +2,23 @@
 
 use App\Http\Controllers\Admin\UserManagementController;
 use App\Http\Controllers\AdminSettingController;
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\AuthController;
-use App\Http\Controllers\WeeklyActionPlanController;
 use App\Http\Controllers\DailyMetricController;
 use App\Http\Controllers\TelegramController;
+use App\Http\Controllers\WeeklyActionPlanController;
 use App\Models\User;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Route;
+
+// Zero-DB health check for Render & uptime monitors (keeps Neon free tier asleep when idle)
+Route::get('/health', function () {
+    return response()->json(['status' => 'ok']);
+});
 
 Route::get('/public/stats', function () {
     return response()->json([
         'success' => true,
-        'total_users' => User::count()
+        'total_users' => User::count(),
     ]);
 });
 
@@ -52,6 +57,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // Admin & Super Admin Shared Group
     Route::middleware('isAdmin')->prefix('admin')->group(function () {
         Route::get('/users', [UserManagementController::class, 'index']);
+        Route::put('/users/{user}/reset-password', [UserManagementController::class, 'adminResetPassword']);
         Route::get('/company-summary', [WeeklyActionPlanController::class, 'companySummary']);
         Route::get('/member-plan', [WeeklyActionPlanController::class, 'getMemberPlan']);
         Route::get('/team-reports', [WeeklyActionPlanController::class, 'teamReportsSummary']);
@@ -65,14 +71,14 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/users/{id}/telegram-test', [AdminSettingController::class, 'sendInstantTestReminder']);
     });
 
+    // Kept outside prefix('admin') so existing frontend URL (/api/company-summary/notes) does not break
+    Route::post('/company-summary/notes', [WeeklyActionPlanController::class, 'saveSummaryNotes'])
+        ->middleware('isAdmin');
+
     // Super Admin Exclusive Group
     Route::middleware('isSuperAdmin')->prefix('super-admin')->group(function () {
         Route::patch('/users/{user}/role', [UserManagementController::class, 'updateRole']);
-        Route::patch('/users/{id}/role', [UserManagementController::class, 'updateRole']);
         Route::delete('/users/{user}', [UserManagementController::class, 'destroy']);
     });
-
-    Route::post('/company-summary/notes', [WeeklyActionPlanController::class, 'saveSummaryNotes']);
-    Route::put('/admin/users/{user}/reset-password', [UserManagementController::class, 'adminResetPassword']);
 
 });
