@@ -492,7 +492,7 @@ class WeeklyActionPlanController extends Controller
             $query->whereDate('start_date', $expectedStartDate);
         } elseif ($year && $month) {
             $monthDates = $this->resolveMonthStartDates($year, $month);
-            $query->whereIn(DB::raw('CAST(start_date AS DATE)'), $monthDates);
+            $query->whereIn(DB::raw('DATE(start_date)'), $monthDates);
         } else {
             $query->whereYear('start_date', $year);
             if ($weekNumber) {
